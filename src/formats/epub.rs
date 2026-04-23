@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use rbook::{Epub, prelude::*};
+use rbook::Epub;
 
 use crate::book::{BookMeta, BookReader, Chapter, ContentBlock};
 

@@ -1,4 +1,3 @@
-use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -14,6 +13,7 @@ mod storage;
 mod ui;
 
 use app::App;
+use storage::book_id;
 
 #[derive(Parser)]
 #[command(name = "ink-reader", about = "Terminal TUI e-book reader", version)]
@@ -41,10 +41,7 @@ fn run(
     reader: Box<dyn book::BookReader>,
     book_path: &std::path::Path,
 ) -> Result<()> {
-    let mut app = App::new(reader)?;
-
-    // Store the canonical path as book key in the app (used for bookmarks)
-    let book_key = book_path.to_string_lossy().into_owned();
+    let mut app = App::new(reader, book_id(book_path))?;
 
     // Initial render — we need the terminal size to paginate
     let size = terminal.size()?;
@@ -74,7 +71,5 @@ fn run(
         }
     }
 
-    // Persist book key for bookmarks (override placeholder used during dev)
-    drop(book_key); // used via app internally in full version
     Ok(())
 }

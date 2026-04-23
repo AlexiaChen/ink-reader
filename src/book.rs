@@ -2,6 +2,7 @@ use anyhow::Result;
 
 /// A single chapter in the book
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Chapter {
     pub index: usize,
     pub title: String,
@@ -13,12 +14,14 @@ pub struct Chapter {
 #[derive(Debug, Clone)]
 pub struct BookMeta {
     pub title: String,
+    #[allow(dead_code)]
     pub author: Option<String>,
     pub chapters: Vec<Chapter>,
 }
 
 /// A structured block of content within a chapter
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum ContentBlock {
     Paragraph(String),
     Heading { level: u8, text: String },
@@ -34,6 +37,7 @@ pub trait BookReader: Send {
 
 /// An image on a rendered page
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PageImage {
     pub data: Vec<u8>,
     pub mime: String,
@@ -44,8 +48,10 @@ pub struct PageImage {
 #[derive(Debug, Clone, Default)]
 pub struct Page {
     pub lines: Vec<String>,
+    #[allow(dead_code)]
     pub image: Option<PageImage>,
     /// Logical position: index of the first ContentBlock on this page
+    #[allow(dead_code)]
     pub first_block: usize,
 }
 
@@ -68,7 +74,7 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
     let mut cur_first: usize = 0;
     let mut cur_image: Option<PageImage> = None;
 
-    let mut flush = |pages: &mut Vec<Page>,
+    let flush = |pages: &mut Vec<Page>,
                      lines: &mut Vec<String>,
                      first: &mut usize,
                      img: &mut Option<PageImage>,

@@ -111,6 +111,7 @@ impl BookmarkStore {
     }
 
     /// Load from a specific path (used in tests).
+    #[cfg(test)]
     pub fn load_from(path: &PathBuf) -> Result<Self> {
         let bookmarks = if path.exists() {
             let data = std::fs::read_to_string(path)?;

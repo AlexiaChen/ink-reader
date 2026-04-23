@@ -23,12 +23,14 @@ pub struct App {
     pub toc_state: ratatui::widgets::ListState,
     pub bookmark_state: ratatui::widgets::ListState,
     pub bookmarks: BookmarkStore,
+    #[allow(dead_code)]
     pub picker: Option<Picker>,
+    pub book_path: String,
     pub should_quit: bool,
 }
 
 impl App {
-    pub fn new(reader: Box<dyn BookReader>) -> Result<Self> {
+    pub fn new(reader: Box<dyn BookReader>, book_path: String) -> Result<Self> {
         let bookmarks = BookmarkStore::load()?;
         let picker = Picker::from_query_stdio()
             .ok()
@@ -45,6 +47,7 @@ impl App {
             bookmark_state: ratatui::widgets::ListState::default(),
             bookmarks,
             picker,
+            book_path,
             should_quit: false,
         };
 
@@ -136,14 +139,6 @@ impl App {
             }
             // Add bookmark at current position
             KeyCode::Char('a') => {
-                let book_path = self
-                    .reader
-                    .meta()
-                    .chapters
-                    .first()
-                    .map(|_| "book")
-                    .unwrap_or("book")
-                    .to_string();
                 let chapter_title = self
                     .reader
                     .meta()
@@ -152,7 +147,7 @@ impl App {
                     .map(|c| c.title.clone())
                     .unwrap_or_default();
                 self.bookmarks.add(Bookmark::new(
-                    book_path,
+                    self.book_path.clone(),
                     self.current_chapter,
                     0,
                     chapter_title,
@@ -196,14 +191,7 @@ impl App {
     }
 
     fn handle_key_bookmarks(&mut self, key: KeyEvent, size: Size) {
-        let book_key = self
-            .reader
-            .meta()
-            .chapters
-            .first()
-            .map(|_| "book")
-            .unwrap_or("book")
-            .to_string();
+        let book_key = self.book_path.clone();
         let bm_count = self.bookmarks.for_book(&book_key).len();
 
         match key.code {
@@ -228,11 +216,11 @@ impl App {
             }
             KeyCode::Enter => {
                 let bmarks = self.bookmarks.for_book(&book_key);
-                if let Some(idx) = self.bookmark_state.selected() {
-                    if let Some(bm) = bmarks.get(idx) {
-                        let chapter = bm.chapter;
-                        self.load_chapter(chapter, size);
-                    }
+                if let Some(idx) = self.bookmark_state.selected()
+                    && let Some(bm) = bmarks.get(idx)
+                {
+                    let chapter = bm.chapter;
+                    self.load_chapter(chapter, size);
                 }
                 self.mode = Mode::Reading;
             }
