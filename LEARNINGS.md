@@ -29,3 +29,19 @@
 - **Evidence**: `~/.cargo/registry/src/.../pdf_oxide-0.3.37/src/lib.rs`
 - **Confidence**: 10/10
 - **Action**: Always append `?` when calling `doc.page_count()`; use `page_count_u32()` if you need an infallible count.
+
+### L-004: [gotcha] sudo make + rustup shim needs HOME set (2025-01-01)
+- **Issue**: #48 — 加入Makefile
+- **Trigger**: sudo, Makefile, rustup, cargo, install, HOME
+- **Pattern**: `sudo make install` fails with "rustup could not choose a version of cargo" because rustup's cargo shim reads HOME to find `~/.rustup/toolchains`, but `sudo` resets `HOME=/root`.
+- **Evidence**: `cargo install` under sudo, error "one wasn't specified explicitly, and no default is configured"
+- **Confidence**: 10/10
+- **Action**: In Makefiles, detect `SUDO_USER` and prepend `HOME=$(REAL_HOME)` to every cargo invocation:
+  ```makefile
+  ifdef SUDO_USER
+      REAL_HOME := $(shell eval echo ~$(SUDO_USER))
+      CARGO := HOME=$(REAL_HOME) $(REAL_HOME)/.cargo/bin/cargo
+  else
+      CARGO := $(shell command -v cargo 2>/dev/null || echo $$HOME/.cargo/bin/cargo)
+  endif
+  ```
