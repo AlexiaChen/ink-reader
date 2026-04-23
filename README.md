@@ -3,7 +3,7 @@
 > Ink on the terminal — read ebooks in your terminal.
 
 A fast, keyboard-driven TUI e-book reader for Linux/macOS built with Rust and
-[Ratatui](https://github.com/ratatui-org/ratatui). Open EPUB, MOBI, AZW3, PDF,
+[Ratatui](https://github.com/ratatui/ratatui). Open EPUB, MOBI, AZW3, PDF,
 and plain-text files without leaving the command line.
 
 ![Rust](https://img.shields.io/badge/rust-2024_edition-orange)
