@@ -45,3 +45,11 @@
       CARGO := $(shell command -v cargo 2>/dev/null || echo $$HOME/.cargo/bin/cargo)
   endif
   ```
+
+### L-005: [gotcha] textwrap AsciiSpace breaks CJK paragraph indent (2025-01-01)
+- **Issue**: #50 — 提升阅读体验
+- **Trigger**: textwrap, indent, CJK, Chinese, paragraph, initial_indent, wrap
+- **Pattern**: `WordSeparator::AsciiSpace` treats an entire CJK string (no ASCII spaces) as a single "word". When that word's display width exceeds `wrap_width - indent_width`, textwrap emits just the indent on line 0 with no content, then the text on line 1 with no indent — making `initial_indent` appear non-functional.
+- **Evidence**: `src/book.rs:183` — switching to `UnicodeBreakProperties` fixes the issue.
+- **Confidence**: 9/10
+- **Action**: Always use `WordSeparator::UnicodeBreakProperties` (not `AsciiSpace`) when the content may contain CJK or other non-space-separated scripts.
