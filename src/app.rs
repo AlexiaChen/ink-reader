@@ -4,6 +4,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Size;
 use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
 
 use crate::book::{paginate_blocks, BookReader, ContentBlock, Page, PaginationKey};
 use crate::storage::{Bookmark, BookmarkStore};
@@ -33,11 +34,16 @@ pub struct App {
     pub toc_state: ratatui::widgets::ListState,
     pub bookmark_state: ratatui::widgets::ListState,
     pub bookmarks: BookmarkStore,
-    #[allow(dead_code)]
     pub picker: Option<Picker>,
     pub book_path: String,
     pub should_quit: bool,
     pub anim: Option<AnimState>,
+    /// Whether the book cover is currently being displayed.
+    pub showing_cover: bool,
+    /// Raw bytes of the cover image, if the format provided one.
+    pub cover_bytes: Option<Vec<u8>>,
+    /// Active image protocol for the current cover or in-chapter image page.
+    pub current_image: Option<StatefulProtocol>,
 }
 
 impl App {
@@ -46,6 +52,10 @@ impl App {
         let picker = Picker::from_query_stdio()
             .ok()
             .or_else(|| Some(Picker::halfblocks()));
+
+        // Extract cover bytes before moving `reader` into the struct.
+        let cover_bytes = reader.cover_image().map(|(d, _)| d.to_vec());
+        let showing_cover = cover_bytes.is_some();
 
         let mut app = Self {
             reader,
@@ -61,9 +71,16 @@ impl App {
             book_path,
             should_quit: false,
             anim: None,
+            showing_cover,
+            cover_bytes,
+            current_image: None,
         };
 
         app.toc_state.select(Some(0));
+        // Build the cover image protocol if a cover is available.
+        if app.showing_cover {
+            app.refresh_current_image();
+        }
         Ok(app)
     }
 
@@ -94,6 +111,35 @@ impl App {
         self.current_chapter = chapter_idx;
         self.current_page = 0;
         self.pagination_key = Some(key);
+        self.refresh_current_image();
+    }
+
+    /// Rebuild `current_image` from whatever is currently being displayed:
+    /// the book cover (when `showing_cover`) or an image embedded in the
+    /// current page.  Clears `current_image` if there is nothing to show.
+    pub fn refresh_current_image(&mut self) {
+        self.current_image = None;
+
+        let bytes: Vec<u8> = if self.showing_cover {
+            match &self.cover_bytes {
+                Some(b) => b.clone(),
+                None => return,
+            }
+        } else if let Some(img) = self
+            .pages
+            .get(self.current_page)
+            .and_then(|p| p.image.as_ref())
+        {
+            img.data.clone()
+        } else {
+            return;
+        };
+
+        if let Ok(dyn_img) = image::load_from_memory(&bytes) {
+            if let Some(picker) = &self.picker {
+                self.current_image = Some(picker.new_resize_protocol(dyn_img));
+            }
+        }
     }
 
     /// Called on terminal resize.
@@ -269,11 +315,23 @@ impl App {
     }
 
     fn next_page(&mut self, size: Size) {
+        // Dismiss cover: transition to chapter 0 page 0 without animation.
+        if self.showing_cover {
+            self.showing_cover = false;
+            self.refresh_current_image();
+            return;
+        }
+
         if self.pages.is_empty() {
             self.load_chapter(self.current_chapter, size);
             return;
         }
-        let old_lines = self.pages.get(self.current_page).map(|p| p.lines.clone()).unwrap_or_default();
+
+        let old_has_image =
+            self.pages.get(self.current_page).map_or(false, |p| p.image.is_some());
+        let old_lines =
+            self.pages.get(self.current_page).map(|p| p.lines.clone()).unwrap_or_default();
+
         let moved = if self.current_page + 1 < self.pages.len() {
             self.current_page += 1;
             true
@@ -286,13 +344,44 @@ impl App {
                 false
             }
         };
+
         if moved {
-            self.anim = Some(AnimState { old_lines, start: Instant::now(), duration_ms: 300, forward: true });
+            self.refresh_current_image();
+            // Skip page-flip animation when either the old or new page has an image.
+            let new_has_image = self.current_image.is_some();
+            if !old_has_image && !new_has_image {
+                self.anim = Some(AnimState {
+                    old_lines,
+                    start: Instant::now(),
+                    duration_ms: 300,
+                    forward: true,
+                });
+            }
         }
     }
 
     fn prev_page(&mut self, size: Size) {
-        let old_lines = self.pages.get(self.current_page).map(|p| p.lines.clone()).unwrap_or_default();
+        // If we're at the very start of the book and a cover exists, go back to it.
+        if !self.showing_cover
+            && self.current_chapter == 0
+            && self.current_page == 0
+            && self.cover_bytes.is_some()
+        {
+            self.showing_cover = true;
+            self.refresh_current_image();
+            return;
+        }
+
+        if self.showing_cover {
+            // Already at cover; nothing further back.
+            return;
+        }
+
+        let old_has_image =
+            self.pages.get(self.current_page).map_or(false, |p| p.image.is_some());
+        let old_lines =
+            self.pages.get(self.current_page).map(|p| p.lines.clone()).unwrap_or_default();
+
         let moved = if self.current_page > 0 {
             self.current_page -= 1;
             true
@@ -304,8 +393,18 @@ impl App {
         } else {
             false
         };
+
         if moved {
-            self.anim = Some(AnimState { old_lines, start: Instant::now(), duration_ms: 300, forward: false });
+            self.refresh_current_image();
+            let new_has_image = self.current_image.is_some();
+            if !old_has_image && !new_has_image {
+                self.anim = Some(AnimState {
+                    old_lines,
+                    start: Instant::now(),
+                    duration_ms: 300,
+                    forward: false,
+                });
+            }
         }
     }
 

@@ -53,3 +53,19 @@
 - **Evidence**: `src/book.rs:183` — switching to `UnicodeBreakProperties` fixes the issue.
 - **Confidence**: 9/10
 - **Action**: Always use `WordSeparator::UnicodeBreakProperties` (not `AsciiSpace`) when the content may contain CJK or other non-space-separated scripts.
+
+### L-006: [gotcha] rbook ManifestEntry::read_bytes() 可直接调用，无需 epub.read_resource_bytes() (2026-04-23)
+- **Issue**: #52 — 不是支持图片的渲染吗？
+- **Trigger**: epub, manifest, cover, image, read_bytes, rbook
+- **Pattern**: `ManifestEntry` trait 自带 `read_bytes()` 方法，可在借用 `manifest` 期间直接读取资源字节，无需先提取 `href` 再调用 `epub.read_resource_bytes()`，从根本上规避了生命周期冲突问题。
+- **Evidence**: `src/formats/epub.rs` `extract_cover()` 函数
+- **Confidence**: 9/10
+- **Action**: 直接用 `entry.read_bytes().ok()` 在同一 `{}` 块内完成读取；不要拆分成"取 href → 再读字节"两步。
+
+### L-007: [convention] MOBI/AZW3 第一个图片记录即封面 (2026-04-23)
+- **Issue**: #52 — 不是支持图片的渲染吗？
+- **Trigger**: mobi, azw3, cover, image, image_records, first_image_index
+- **Pattern**: `mobi` crate 的 `image_records()` 从 `first_image_index` 起过滤出所有图片记录，按 MOBI 格式惯例第一个即为封面图片。
+- **Evidence**: `src/formats/mobi.rs` `MobiReader::open()`
+- **Confidence**: 8/10
+- **Action**: 用 `m.image_records().first()` 并复制 `r.content.to_vec()` 获取封面字节；`m` 须在整个操作期间保持存活。

@@ -33,6 +33,10 @@ pub enum ContentBlock {
 pub trait BookReader: Send {
     fn meta(&self) -> &BookMeta;
     fn chapter_blocks(&self, chapter_idx: usize) -> Result<Vec<ContentBlock>>;
+    /// Return the book cover image as `(bytes, mime_type)`, if available.
+    fn cover_image(&self) -> Option<(&[u8], &str)> {
+        None
+    }
 }
 
 /// An image on a rendered page

@@ -11,6 +11,7 @@ use crate::book::{BookMeta, BookReader, Chapter, ContentBlock};
 pub struct MobiReader {
     meta: BookMeta,
     text: String,
+    cover: Option<(Vec<u8>, String)>,
 }
 
 impl MobiReader {
@@ -25,6 +26,18 @@ impl MobiReader {
         let text = html2text::from_read(html.as_bytes(), 80)
             .unwrap_or_else(|_| html.clone());
 
+        // Extract cover image: first image record is conventionally the cover
+        let cover = {
+            let records = m.image_records();
+            records.first().and_then(|r| {
+                let data = r.content.to_vec();
+                image::load_from_memory(&data).ok().map(|_| {
+                    let mime = Self::detect_mime(&data).to_string();
+                    (data, mime)
+                })
+            })
+        };
+
         let meta = BookMeta {
             title: title.clone(),
             author,
@@ -35,13 +48,29 @@ impl MobiReader {
             }],
         };
 
-        Ok(Self { meta, text })
+        Ok(Self { meta, text, cover })
+    }
+
+    fn detect_mime(data: &[u8]) -> &'static str {
+        if data.starts_with(b"\xFF\xD8") {
+            "image/jpeg"
+        } else if data.starts_with(b"\x89PNG") {
+            "image/png"
+        } else if data.starts_with(b"GIF8") {
+            "image/gif"
+        } else {
+            "image/unknown"
+        }
     }
 }
 
 impl BookReader for MobiReader {
     fn meta(&self) -> &BookMeta {
         &self.meta
+    }
+
+    fn cover_image(&self) -> Option<(&[u8], &str)> {
+        self.cover.as_ref().map(|(d, m)| (d.as_slice(), m.as_str()))
     }
 
     fn chapter_blocks(&self, chapter_idx: usize) -> Result<Vec<ContentBlock>> {

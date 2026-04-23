@@ -5,6 +5,8 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
+use ratatui_image::StatefulImage;
+use ratatui_image::protocol::StatefulProtocol;
 
 use crate::app::{AnimState, App};
 
@@ -25,35 +27,51 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_status(frame: &mut Frame, app: &App, area: Rect) {
     let meta = app.reader.meta();
     let chapters = &meta.chapters;
-    let chapter_title = chapters
-        .get(app.current_chapter)
-        .map(|c| c.title.as_str())
-        .unwrap_or("");
 
-    let total_pages = app.pages.len().max(1);
-    let current_page = app.current_page + 1;
-
-    let status = format!(
-        " {} │ {} │ {}/{} pg  {}/{}  ch",
-        meta.title,
-        chapter_title,
-        current_page,
-        total_pages,
-        app.current_chapter + 1,
-        chapters.len()
-    );
+    let status = if app.showing_cover {
+        format!(" {} │ Cover", meta.title)
+    } else {
+        let chapter_title = chapters
+            .get(app.current_chapter)
+            .map(|c| c.title.as_str())
+            .unwrap_or("");
+        let total_pages = app.pages.len().max(1);
+        let current_page = app.current_page + 1;
+        format!(
+            " {} │ {} │ {}/{} pg  {}/{}  ch",
+            meta.title,
+            chapter_title,
+            current_page,
+            total_pages,
+            app.current_chapter + 1,
+            chapters.len()
+        )
+    };
 
     let line = Line::from(Span::styled(
         status,
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Cyan),
+        Style::default().fg(Color::Black).bg(Color::Cyan),
     ));
 
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn render_content(frame: &mut Frame, app: &App, area: Rect) {
+fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Render an image page (cover or embedded in-chapter image).
+    if let Some(ref mut proto) = app.current_image {
+        frame.render_stateful_widget(StatefulImage::<StatefulProtocol>::default(), area, proto);
+        return;
+    }
+
+    // Cover with no displayable image (e.g. terminal lacks graphics support).
+    if app.showing_cover {
+        let placeholder =
+            Paragraph::new("[ Cover image — press → to start reading ]")
+                .block(Block::default().borders(Borders::NONE));
+        frame.render_widget(placeholder, area);
+        return;
+    }
+
     let text: Vec<Line> = if app.pages.is_empty() {
         vec![Line::from("Loading…")]
     } else if let Some(anim) = &app.anim {
@@ -70,13 +88,8 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
             .unwrap_or_default()
     };
 
-    let block = Block::default()
-        .borders(Borders::NONE);
-
-    let para = Paragraph::new(text)
-        .block(block)
-        .wrap(Wrap { trim: false });
-
+    let block = Block::default().borders(Borders::NONE);
+    let para = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
     frame.render_widget(para, area);
 }
 
