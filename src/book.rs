@@ -92,8 +92,7 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
     for (block_idx, block) in blocks.iter().enumerate() {
         match block {
             ContentBlock::Paragraph(text) => {
-                let indented = format!("  {text}");
-                for line in wrap_text(&indented, wrap_w) {
+                for line in wrap_paragraph(text, wrap_w) {
                     if cur_lines.len() >= page_h {
                         flush(&mut pages, &mut cur_lines, &mut cur_first, &mut cur_image, block_idx);
                     }
@@ -159,6 +158,17 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
 
 /// Wrap text to fit within `width` columns, sanitizing control characters.
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    wrap_with_opts(text, width, "", "")
+}
+
+/// Wrap a paragraph with a 4-space first-line indent (段落首行缩进).
+/// Uses textwrap's `initial_indent` so the first-line content is correctly
+/// limited to `width - 4` characters, avoiding overflow.
+fn wrap_paragraph(text: &str, width: usize) -> Vec<String> {
+    wrap_with_opts(text, width, "    ", "")
+}
+
+fn wrap_with_opts(text: &str, width: usize, initial: &str, subsequent: &str) -> Vec<String> {
     // Sanitize: strip control chars that could inject terminal escape sequences
     let sanitized: String = text
         .chars()
@@ -167,6 +177,8 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
         .replace('\t', "    ");
 
     let options = textwrap::Options::new(width)
+        .initial_indent(initial)
+        .subsequent_indent(subsequent)
         .break_words(true)
         .word_separator(textwrap::WordSeparator::AsciiSpace);
 
