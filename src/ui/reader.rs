@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::App;
+use crate::app::{AnimState, App};
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     // Layout: status (1) | content (fill) | help (1)
@@ -56,6 +56,8 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
 fn render_content(frame: &mut Frame, app: &App, area: Rect) {
     let text: Vec<Line> = if app.pages.is_empty() {
         vec![Line::from("Loading…")]
+    } else if let Some(anim) = &app.anim {
+        build_anim_frame(anim, app, area.height as usize)
     } else {
         app.pages
             .get(app.current_page)
@@ -76,6 +78,39 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
         .wrap(Wrap { trim: false });
 
     frame.render_widget(para, area);
+}
+
+/// Build a single animation frame: each line fans in from old → new content
+/// at a staggered threshold so the page "rolls" top-down (forward) or
+/// bottom-up (backward).
+fn build_anim_frame<'a>(anim: &'a AnimState, app: &'a App, height: usize) -> Vec<Line<'a>> {
+    let elapsed_ms = anim.start.elapsed().as_millis() as u64;
+    let ratio = (elapsed_ms as f32 / anim.duration_ms as f32).clamp(0.0, 1.0);
+
+    let new_lines = app.pages
+        .get(app.current_page)
+        .map(|p| p.lines.as_slice())
+        .unwrap_or(&[]);
+
+    (0..height)
+        .map(|i| {
+            // Each line has a threshold in [0, 1) at which it switches to new content.
+            // Forward: line 0 switches first (fan-down).
+            // Backward: last line switches first (fan-up).
+            let threshold = if height > 0 {
+                let pos = if anim.forward { i } else { height - 1 - i };
+                pos as f32 / height as f32
+            } else {
+                0.0
+            };
+            let s: &str = if ratio >= threshold {
+                new_lines.get(i).map(|s| s.as_str()).unwrap_or("")
+            } else {
+                anim.old_lines.get(i).map(|s| s.as_str()).unwrap_or("")
+            };
+            Line::from(s)
+        })
+        .collect()
 }
 
 fn render_help(frame: &mut Frame, area: Rect) {

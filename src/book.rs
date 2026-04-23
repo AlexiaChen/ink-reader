@@ -92,7 +92,8 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
     for (block_idx, block) in blocks.iter().enumerate() {
         match block {
             ContentBlock::Paragraph(text) => {
-                for line in wrap_text(text, wrap_w) {
+                let indented = format!("  {text}");
+                for line in wrap_text(&indented, wrap_w) {
                     if cur_lines.len() >= page_h {
                         flush(&mut pages, &mut cur_lines, &mut cur_first, &mut cur_image, block_idx);
                     }

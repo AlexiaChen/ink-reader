@@ -49,9 +49,11 @@ fn run(
     app.load_chapter(0, tui_size);
 
     loop {
+        app.tick_anim();
         terminal.draw(|frame| ui::render(frame, &mut app))?;
 
-        if !event::poll(Duration::from_millis(200))? {
+        let poll_ms: u64 = if app.anim.is_some() { 15 } else { 200 };
+        if !event::poll(Duration::from_millis(poll_ms))? {
             continue;
         }
 

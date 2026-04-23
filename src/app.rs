@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Size;
@@ -5,6 +7,14 @@ use ratatui_image::picker::Picker;
 
 use crate::book::{paginate_blocks, BookReader, ContentBlock, Page, PaginationKey};
 use crate::storage::{Bookmark, BookmarkStore};
+
+/// State for a running page-flip animation.
+pub struct AnimState {
+    pub old_lines: Vec<String>,
+    pub start: Instant,
+    pub duration_ms: u64,
+    pub forward: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -27,6 +37,7 @@ pub struct App {
     pub picker: Option<Picker>,
     pub book_path: String,
     pub should_quit: bool,
+    pub anim: Option<AnimState>,
 }
 
 impl App {
@@ -49,6 +60,7 @@ impl App {
             picker,
             book_path,
             should_quit: false,
+            anim: None,
         };
 
         app.toc_state.select(Some(0));
@@ -57,6 +69,7 @@ impl App {
 
     /// (Re-)paginate the current chapter for the given terminal size.
     pub fn load_chapter(&mut self, chapter_idx: usize, size: Size) {
+        self.anim = None; // cancel any in-flight animation
         let key = PaginationKey {
             chapter: chapter_idx,
             width: size.width,
@@ -98,13 +111,21 @@ impl App {
     }
 
     fn handle_key_reading(&mut self, key: KeyEvent, size: Size) {
+        // Quit always works, even during animation
+        if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+            || (key.code == KeyCode::Char('c')
+                && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
+            self.should_quit = true;
+            return;
+        }
+
+        // Any other key during animation: cancel it and eat the keypress
+        if self.anim.take().is_some() {
+            return;
+        }
+
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => {
-                self.should_quit = true;
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
-            }
             // Next page
             KeyCode::Down | KeyCode::Char(' ') => {
                 self.next_page(size);
@@ -252,25 +273,48 @@ impl App {
             self.load_chapter(self.current_chapter, size);
             return;
         }
-        if self.current_page + 1 < self.pages.len() {
+        let old_lines = self.pages.get(self.current_page).map(|p| p.lines.clone()).unwrap_or_default();
+        let moved = if self.current_page + 1 < self.pages.len() {
             self.current_page += 1;
+            true
         } else {
-            // Advance to next chapter
             let next = self.current_chapter + 1;
             if next < self.reader.meta().chapters.len() {
                 self.load_chapter(next, size);
+                true
+            } else {
+                false
             }
+        };
+        if moved {
+            self.anim = Some(AnimState { old_lines, start: Instant::now(), duration_ms: 300, forward: true });
         }
     }
 
     fn prev_page(&mut self, size: Size) {
-        if self.current_page > 0 {
+        let old_lines = self.pages.get(self.current_page).map(|p| p.lines.clone()).unwrap_or_default();
+        let moved = if self.current_page > 0 {
             self.current_page -= 1;
+            true
         } else if self.current_chapter > 0 {
-            // Go to last page of previous chapter
             let prev = self.current_chapter - 1;
             self.load_chapter(prev, size);
             self.current_page = self.pages.len().saturating_sub(1);
+            true
+        } else {
+            false
+        };
+        if moved {
+            self.anim = Some(AnimState { old_lines, start: Instant::now(), duration_ms: 300, forward: false });
+        }
+    }
+
+    /// Expire completed animations (call once per event-loop iteration).
+    pub fn tick_anim(&mut self) {
+        if let Some(a) = &self.anim {
+            if a.start.elapsed().as_millis() as u64 >= a.duration_ms {
+                self.anim = None;
+            }
         }
     }
 }
