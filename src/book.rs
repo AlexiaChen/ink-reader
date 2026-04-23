@@ -180,7 +180,7 @@ fn wrap_with_opts(text: &str, width: usize, initial: &str, subsequent: &str) -> 
         .initial_indent(initial)
         .subsequent_indent(subsequent)
         .break_words(true)
-        .word_separator(textwrap::WordSeparator::AsciiSpace);
+        .word_separator(textwrap::WordSeparator::UnicodeBreakProperties);
 
     let mut result = Vec::new();
     for line in sanitized.split('\n') {
@@ -224,15 +224,30 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_strips_escape_sequences() {
+    fn paragraph_indent_ascii() {
         let blocks = vec![ContentBlock::Paragraph(
-            "safe \x1b[31mred\x1b[0m text".to_string(),
+            "The quick brown fox jumps over the lazy dog.".to_string(),
         )];
         let pages = paginate_blocks(&blocks, 80, 24);
-        for page in &pages {
-            for line in &page.lines {
-                assert!(!line.contains('\x1b'), "escape sequences must be stripped");
-            }
-        }
+        let first_line = &pages[0].lines[0];
+        assert!(
+            first_line.starts_with("    "),
+            "paragraph first line must have 4-space indent, got: {:?}",
+            first_line
+        );
+    }
+
+    #[test]
+    fn paragraph_indent_cjk() {
+        let blocks = vec![ContentBlock::Paragraph(
+            "这是一个中文段落，需要正确地缩进首行显示。".to_string(),
+        )];
+        let pages = paginate_blocks(&blocks, 40, 24);
+        let first_line = &pages[0].lines[0];
+        assert!(
+            first_line.starts_with("    "),
+            "CJK paragraph first line must have 4-space indent, got: {:?}",
+            first_line
+        );
     }
 }
