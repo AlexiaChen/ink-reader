@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 use mobi::Mobi;
 
-use crate::book::{BookMeta, BookReader, Chapter, ContentBlock};
+use crate::book::{BookMeta, BookReader, Chapter, ContentBlock, detect_image_mime};
 
 /// Reader for MOBI / AZW / AZW3 files.
 /// MOBI has no native ToC support in the `mobi` crate; the entire
@@ -31,10 +31,11 @@ impl MobiReader {
             let records = m.image_records();
             records.first().and_then(|r| {
                 let data = r.content.to_vec();
-                image::load_from_memory(&data).ok().map(|_| {
-                    let mime = Self::detect_mime(&data).to_string();
-                    (data, mime)
-                })
+                let mime = detect_image_mime(&data);
+                if mime == "image/unknown" {
+                    return None;
+                }
+                image::load_from_memory(&data).ok().map(|_| (data, mime.to_string()))
             })
         };
 
@@ -49,18 +50,6 @@ impl MobiReader {
         };
 
         Ok(Self { meta, text, cover })
-    }
-
-    fn detect_mime(data: &[u8]) -> &'static str {
-        if data.starts_with(b"\xFF\xD8") {
-            "image/jpeg"
-        } else if data.starts_with(b"\x89PNG") {
-            "image/png"
-        } else if data.starts_with(b"GIF8") {
-            "image/gif"
-        } else {
-            "image/unknown"
-        }
     }
 }
 

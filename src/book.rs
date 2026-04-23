@@ -67,6 +67,22 @@ pub struct PaginationKey {
     pub height: u16,
 }
 
+/// Detect image MIME type from magic bytes.
+/// Returns `"image/unknown"` for unrecognised formats (e.g. SVG, broken data).
+pub(crate) fn detect_image_mime(data: &[u8]) -> &'static str {
+    if data.starts_with(b"\xFF\xD8") {
+        "image/jpeg"
+    } else if data.starts_with(b"\x89PNG") {
+        "image/png"
+    } else if data.starts_with(b"GIF8") {
+        "image/gif"
+    } else if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        "image/unknown"
+    }
+}
+
 /// Paginate content blocks into pages that fit the terminal.
 /// Reserves 3 lines for status bar + help bar.
 pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<Page> {
