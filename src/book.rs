@@ -98,6 +98,10 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                     }
                     cur_lines.push(line);
                 }
+                // Blank line after each paragraph (spacing between blocks)
+                if cur_lines.len() < page_h {
+                    cur_lines.push(String::new());
+                }
             }
             ContentBlock::Heading { level, text } => {
                 let marker = "#".repeat((*level).clamp(1, 6) as usize);

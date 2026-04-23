@@ -106,11 +106,11 @@ impl App {
                 self.should_quit = true;
             }
             // Next page
-            KeyCode::Right | KeyCode::Char('l') | KeyCode::Char(' ') => {
+            KeyCode::Down | KeyCode::Char(' ') => {
                 self.next_page(size);
             }
             // Previous page
-            KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::Up => {
                 self.prev_page(size);
             }
             // Next chapter
