@@ -4,10 +4,33 @@
 
 A fast, keyboard-driven TUI e-book reader for Linux/macOS built with Rust and
 [Ratatui](https://github.com/ratatui/ratatui). Open EPUB, MOBI, AZW3, PDF,
-and plain-text files without leaving the command line.
+and plain-text files without leaving the command line. It now renders book
+cover art and inline illustrations directly inside supported terminals.
 
 ![Rust](https://img.shields.io/badge/rust-2024_edition-orange)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+
+---
+
+## Preview
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="doc/image/cover.png" alt="ink-reader displaying a book cover inside the terminal" />
+    </td>
+    <td align="center" width="50%">
+      <img src="doc/image/inline.jpg" alt="ink-reader rendering inline illustrations inside book content" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Cover art</strong><br />Open a book and see its cover before you start reading.</td>
+    <td align="center"><strong>Inline illustrations</strong><br />Keep images and nearby captions in the reading flow.</td>
+  </tr>
+</table>
+
+Image rendering uses terminal image protocols when available and gracefully
+falls back so reading still works in text-only environments.
 
 ---
 
@@ -22,7 +45,8 @@ and plain-text files without leaving the command line.
 | **Chapter navigation** | `n` next chapter · `p` prev chapter |
 | **Page-flip animation** | Smooth fan-in/fan-out effect when turning pages |
 | **Paragraph indent** | 4-space first-line indent for comfortable reading |
-| **Inline images** | Renders cover art and inline images where the terminal supports it |
+| **Cover art** | Displays EPUB and MOBI covers in-terminal when image rendering is available |
+| **Inline illustrations** | Renders chapter images in place and keeps nearby captions with the figure |
 | **Persistent state** | Bookmarks saved to `~/.local/share/ink-reader/bookmarks.json` |
 | **Responsive layout** | Reflows text automatically on terminal resize |
 
