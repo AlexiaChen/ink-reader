@@ -69,3 +69,19 @@
 - **Evidence**: `src/formats/mobi.rs` `MobiReader::open()`
 - **Confidence**: 8/10
 - **Action**: 用 `m.image_records().first()` 并复制 `r.content.to_vec()` 获取封面字节；`m` 须在整个操作期间保持存活。
+
+### L-008: [architecture] Sentinel injection for html2text image extraction (2025-01-01)
+- **Issue**: #53 — 书籍中的插图也要支持图片
+- **Trigger**: epub, html2text, inline image, img tag, chapter_blocks, sentinel, placeholder
+- **Pattern**: To extract images in document order from HTML processed by html2text: (1) scan raw HTML for `<img>` tags first to collect (src, alt) pairs; (2) replace each `<img>` tag with `</p><p>__INKIMG_N__</p><p>` before passing to html2text; (3) after html2text, split on `\n\n` and detect sentinel paragraphs to swap back for ContentBlock::Image. This works because html2text preserves unknown text through the paragraph-level delimiters.
+- **Evidence**: `src/formats/epub.rs` `chapter_blocks()`, `extract_img_tags()`, `parse_img_sentinel()`
+- **Confidence**: 9/10
+- **Action**: Always scan img tags in a separate pass BEFORE injecting sentinels (same left-to-right order preserves index mapping). Defer `image::load_from_memory` decode to display time — validate only via magic bytes at chapter load to avoid decompression-bomb risk.
+
+### L-009: [convention] Shared detect_image_mime in book.rs (2025-01-01)
+- **Issue**: #53 — 书籍中的插图也要支持图片
+- **Trigger**: detect_mime, image mime, magic bytes, image/jpeg, image/unknown
+- **Pattern**: Magic-byte MIME detection should live in `book.rs` as `pub(crate) fn detect_image_mime(data: &[u8]) -> &'static str` and be shared by all format readers. The fallback must be `"image/unknown"`, not `"image/jpeg"` — returning jpeg for unknown bytes causes image::load_from_memory to fail with a confusing error on valid non-jpeg files.
+- **Evidence**: `src/book.rs` `detect_image_mime()`, `src/formats/mobi.rs`
+- **Confidence**: 9/10
+- **Action**: Import `crate::book::detect_image_mime` in all format readers. Never write a local `detect_mime` again.

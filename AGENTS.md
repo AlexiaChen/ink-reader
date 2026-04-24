@@ -31,6 +31,7 @@ src/
 pub trait BookReader {
     fn meta(&self) -> &BookMeta;
     fn chapter_blocks(&self, chapter_idx: usize) -> Result<Vec<ContentBlock>>;
+    fn cover_image(&self) -> Option<(&[u8], &str)> { None }  // default: no cover
 }
 ```
 
@@ -38,8 +39,29 @@ pub trait BookReader {
 `ContentBlock` is an enum: `Paragraph(String)`, `Heading { level, text }`, `Image { data, alt, mime }`, `PageBreak`.
 `Page` has `lines: Vec<String>`, `image: Option<PageImage>`, `first_block: usize`.
 
-### Data Flow
-CLI arg (file path) → detect format → load BookReader impl → App state → ratatui render loop
+### Key Functions in book.rs
+- `pub(crate) fn detect_image_mime(data: &[u8]) -> &'static str` — magic-byte MIME sniff.
+  Returns `"image/jpeg"`, `"image/png"`, `"image/gif"`, `"image/webp"`, or `"image/unknown"`.
+  **All format readers must use this** — never write a local copy. `"image/unknown"` fallback
+  is intentional (not `"image/jpeg"`).
+- `paginate_blocks(blocks, width, height)` — reflow ContentBlocks into pages.
+
+### EPUB Inline Image Extraction (epub.rs)
+`chapter_blocks()` uses a **sentinel injection** pattern to preserve image position through html2text:
+1. Scan raw HTML for `<img>` tags → collect `(src, alt)` pairs (`extract_img_tags`)
+2. Replace each `<img>` with `</p><p>__INKIMG_N__</p><p>` in the HTML string
+3. Run html2text on the modified HTML
+4. Split result on `\n\n`; swap `__INKIMG_N__` paragraphs back to `ContentBlock::Image`
+5. Failed/unsupported (SVG) images emit `[Image: alt]` placeholder paragraph
+
+Helper functions (module-level in epub.rs):
+- `extract_img_tags(html)` → `Vec<(src, alt)>` — case-insensitive, handles `data-src` shadowing
+- `extract_attr(tag, attr)` → `Option<String>` — iterates all occurrences to skip false matches
+- `resolve_href(chapter_href, img_src)` — handles `./`, `../` (clamped), fragment, external URLs
+- `normalize_path(path)` — strips `.`, resolves `..` without going above root
+- `parse_img_sentinel(para)` — detects `__INKIMG_N__` paragraphs, returns index N
+
+Image bytes are stored raw at chapter load; full decode via `image::load_from_memory` is deferred to display time in `refresh_current_image()` to avoid decompression-bomb risk.
 
 ## Key Dependencies
 
@@ -78,6 +100,8 @@ cargo test
 - **Pagination**: Text is reflowed to terminal dimensions on resize
 - **Bookmarks**: Stored in `~/.local/share/ink-reader/bookmarks.json`
 - **Chapter navigation**: Popup ToC with selectable chapters
+- **Cover image**: Displayed on open for EPUB (manifest cover-image or id/href hint) and MOBI (first image record)
+- **Inline illustrations**: EPUB chapter illustrations rendered in-place; SVG/unsupported images shown as `[Image: alt]` placeholder
 - **Images**: Auto-detect terminal protocol; fallback to half-block if unsupported
 - **Formats**: EPUB, MOBI, AZW3, TXT, PDF
 
