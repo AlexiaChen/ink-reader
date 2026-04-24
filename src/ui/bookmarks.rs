@@ -8,30 +8,20 @@ use ratatui::{
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
-    let book_key = app
-        .reader
-        .meta()
-        .chapters
-        .first()
-        .map(|_| "book")
-        .unwrap_or("book")
-        .to_string();
-
-    let bmarks = app.bookmarks.for_book(&book_key);
+    let bmarks = app.bookmarks_for_current_book();
 
     let popup = centered_rect(60, 60, area);
     frame.render_widget(Clear, popup);
 
     let items: Vec<ListItem> = if bmarks.is_empty() {
         vec![ListItem::new(
-            "  (no bookmarks — press 'a' in reading mode)",
+            "  (no bookmarks — press 's' in reading mode)",
         )]
     } else {
         bmarks
             .iter()
-            .enumerate()
-            .map(|(i, bm)| {
-                let label = format!(" #{i}  Ch.{} block {}", bm.chapter + 1, bm.block_index);
+            .map(|bm| {
+                let label = format!(" Ch.{} block {}", bm.chapter + 1, bm.block_index);
                 ListItem::new(label)
             })
             .collect()

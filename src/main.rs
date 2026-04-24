@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableMouseCapture, Event};
 use ratatui::layout::Size;
 
 mod app;
@@ -51,6 +51,11 @@ fn run(
     let tui_size = Size::new(size.width, size.height);
     app.load_chapter(0, tui_size);
 
+    // The app is keyboard-only. Explicitly disable mouse capture so inherited
+    // terminal mouse-reporting sequences cannot leak through as fake keypresses.
+    let mut stdout = std::io::stdout();
+    disable_mouse_capture(&mut stdout)?;
+
     loop {
         app.tick_anim();
         terminal.draw(|frame| ui::render(frame, &mut app))?;
@@ -68,7 +73,12 @@ fn run(
             Event::Resize(w, h) => {
                 app.on_resize(Size::new(w, h));
             }
+            Event::Mouse(_) => {}
             _ => {}
+        }
+
+        if let Some(err) = app.take_pending_error() {
+            return Err(err);
         }
 
         if app.should_quit {
@@ -77,4 +87,23 @@ fn run(
     }
 
     Ok(())
+}
+
+fn disable_mouse_capture<W: std::io::Write>(writer: &mut W) -> std::io::Result<()> {
+    crossterm::execute!(writer, DisableMouseCapture)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::disable_mouse_capture;
+
+    #[test]
+    fn disable_mouse_capture_emits_disable_sequences() {
+        let mut out = Vec::new();
+        disable_mouse_capture(&mut out).unwrap();
+        let ansi = String::from_utf8(out).unwrap();
+
+        assert!(ansi.contains("\u{1b}[?1000l"));
+        assert!(ansi.contains("\u{1b}[?1006l"));
+    }
 }

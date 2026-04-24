@@ -101,13 +101,13 @@ cargo test
 - `←` / `→` or `h` / `l`: Previous / next page
 - `t` or `T`: Open ToC (chapter selection)
 - `b` or `B`: Open bookmarks panel
-- `a`: Add bookmark at current position
+- `s`: Save or overwrite the bookmark at the current position
 - `q` or `Esc`: Quit (or close popup)
 - `j` / `k`: Scroll within popup lists
 
 ## Features
 - **Pagination**: Text is reflowed to terminal dimensions on resize
-- **Bookmarks**: Stored in `~/.local/share/ink-reader/bookmarks.json`
+- **Bookmarks**: One bookmark per book, stored in `~/.local/share/ink-reader/bookmarks.json`, with manual save on `s` and auto-save on quit
 - **Chapter navigation**: Popup ToC with selectable chapters
 - **Cover image**: Displayed on open for EPUB (manifest cover-image or id/href hint)
 - **Inline illustrations**: EPUB chapter illustrations rendered in-place; SVG/unsupported images shown as `[Image: alt]` placeholder

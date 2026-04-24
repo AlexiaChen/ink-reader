@@ -37,6 +37,7 @@ pub struct App {
     pub picker: Option<Picker>,
     pub book_path: String,
     pub should_quit: bool,
+    pending_error: Option<anyhow::Error>,
     pub anim: Option<AnimState>,
     /// Whether the book cover is currently being displayed.
     pub showing_cover: bool,
@@ -70,6 +71,7 @@ impl App {
             picker,
             book_path,
             should_quit: false,
+            pending_error: None,
             anim: None,
             showing_cover,
             cover_bytes,
@@ -160,12 +162,23 @@ impl App {
         }
     }
 
+    pub fn take_pending_error(&mut self) -> Option<anyhow::Error> {
+        self.pending_error.take()
+    }
+
+    pub(crate) fn bookmarks_for_current_book(&self) -> Vec<&Bookmark> {
+        self.bookmarks.for_book(&self.book_path)
+    }
+
     fn handle_key_reading(&mut self, key: KeyEvent, size: Size) {
         // Quit always works, even during animation
         if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
             || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
         {
-            self.should_quit = true;
+            match self.save_current_bookmark() {
+                Ok(()) => self.should_quit = true,
+                Err(err) => self.pending_error = Some(err),
+            }
             return;
         }
 
@@ -205,22 +218,11 @@ impl App {
                 self.mode = Mode::BookmarkOverlay;
                 self.bookmark_state.select(Some(0));
             }
-            // Add bookmark at current position
-            KeyCode::Char('a') => {
-                let chapter_title = self
-                    .reader
-                    .meta()
-                    .chapters
-                    .get(self.current_chapter)
-                    .map(|c| c.title.clone())
-                    .unwrap_or_default();
-                self.bookmarks.add(Bookmark::new(
-                    self.book_path.clone(),
-                    self.current_chapter,
-                    0,
-                    chapter_title,
-                ));
-                let _ = self.bookmarks.save();
+            // Save bookmark at current position
+            KeyCode::Char('s') => {
+                if let Err(err) = self.save_current_bookmark() {
+                    self.pending_error = Some(err);
+                }
             }
             _ => {}
         }
@@ -259,8 +261,7 @@ impl App {
     }
 
     fn handle_key_bookmarks(&mut self, key: KeyEvent, size: Size) {
-        let book_key = self.book_path.clone();
-        let bm_count = self.bookmarks.for_book(&book_key).len();
+        let bm_count = self.bookmarks_for_current_book().len();
 
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('b') => {
@@ -283,23 +284,27 @@ impl App {
                 self.bookmark_state.select(Some(prev));
             }
             KeyCode::Enter => {
-                let bmarks = self.bookmarks.for_book(&book_key);
-                if let Some(idx) = self.bookmark_state.selected()
-                    && let Some(bm) = bmarks.get(idx)
-                {
-                    let chapter = bm.chapter;
-                    self.load_chapter(chapter, size);
+                if let Some(idx) = self.bookmark_state.selected() {
+                    let target = self
+                        .bookmarks_for_current_book()
+                        .get(idx)
+                        .map(|bm| (bm.chapter, bm.block_index));
+                    if let Some((chapter, block_index)) = target {
+                        self.jump_to_bookmark(chapter, block_index, size);
+                    }
                 }
                 self.mode = Mode::Reading;
             }
             KeyCode::Char('d') => {
                 // Delete selected bookmark
                 if let Some(idx) = self.bookmark_state.selected() {
-                    self.bookmarks.remove_for_book(&book_key, idx);
-                    let _ = self.bookmarks.save();
+                    self.bookmarks.remove_for_book(&self.book_path, idx);
+                    if let Err(err) = self.bookmarks.save() {
+                        self.pending_error = Some(err);
+                    }
                 }
                 // Adjust selection
-                let new_count = self.bookmarks.for_book(&book_key).len();
+                let new_count = self.bookmarks_for_current_book().len();
                 if new_count == 0 {
                     self.bookmark_state.select(None);
                 } else {
@@ -426,5 +431,173 @@ impl App {
         {
             self.anim = None;
         }
+    }
+
+    fn save_current_bookmark(&mut self) -> Result<()> {
+        let chapter_title = self
+            .reader
+            .meta()
+            .chapters
+            .get(self.current_chapter)
+            .map(|c| c.title.clone())
+            .unwrap_or_default();
+        let block_index = self
+            .pages
+            .get(self.current_page)
+            .map(|page| page.first_block)
+            .unwrap_or(0);
+
+        self.bookmarks.add(Bookmark::new(
+            self.book_path.clone(),
+            self.current_chapter,
+            block_index,
+            chapter_title,
+        ));
+        self.bookmarks.save()
+    }
+
+    fn jump_to_bookmark(&mut self, chapter: usize, block_index: usize, size: Size) {
+        self.showing_cover = false;
+        self.load_chapter(chapter, size);
+        self.current_page = self
+            .pages
+            .iter()
+            .rposition(|page| page.first_block <= block_index)
+            .unwrap_or(0);
+        self.refresh_current_image();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crossterm::event::{KeyCode, KeyEvent};
+    use ratatui::layout::Size;
+    use tempfile::NamedTempFile;
+
+    use super::*;
+    use crate::book::{BookMeta, Chapter};
+
+    const BOOK_PATH: &str = "/books/test.epub";
+
+    struct DummyReader {
+        meta: BookMeta,
+        chapters: Vec<Vec<ContentBlock>>,
+    }
+
+    impl DummyReader {
+        fn new() -> Self {
+            Self {
+                meta: BookMeta {
+                    title: "Test Book".to_string(),
+                    author: None,
+                    chapters: vec![Chapter {
+                        index: 0,
+                        title: "Chapter 1".to_string(),
+                        resource_id: "chapter-1".to_string(),
+                    }],
+                },
+                chapters: vec![vec![
+                    ContentBlock::Paragraph("Page zero".to_string()),
+                    ContentBlock::PageBreak,
+                    ContentBlock::Paragraph("Page one".to_string()),
+                    ContentBlock::PageBreak,
+                    ContentBlock::Paragraph("Page two".to_string()),
+                ]],
+            }
+        }
+    }
+
+    impl BookReader for DummyReader {
+        fn meta(&self) -> &BookMeta {
+            &self.meta
+        }
+
+        fn chapter_blocks(&self, chapter_idx: usize) -> Result<Vec<ContentBlock>> {
+            Ok(self.chapters[chapter_idx].clone())
+        }
+    }
+
+    fn make_store(path: &PathBuf) -> BookmarkStore {
+        BookmarkStore::load_from(path).unwrap()
+    }
+
+    fn make_app(store: BookmarkStore) -> App {
+        App {
+            reader: Box::new(DummyReader::new()),
+            mode: Mode::Reading,
+            current_chapter: 0,
+            current_page: 0,
+            pages: Vec::new(),
+            pagination_key: None,
+            toc_state: ratatui::widgets::ListState::default(),
+            bookmark_state: ratatui::widgets::ListState::default(),
+            bookmarks: store,
+            picker: None,
+            book_path: BOOK_PATH.to_string(),
+            should_quit: false,
+            pending_error: None,
+            anim: None,
+            showing_cover: false,
+            cover_bytes: None,
+            current_image: None,
+        }
+    }
+
+    #[test]
+    fn bookmark_jump_restores_saved_page() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(40, 8);
+        app.load_chapter(0, size);
+
+        let saved_block = app.pages[1].first_block;
+        app.bookmarks
+            .add(Bookmark::new(BOOK_PATH, 0, saved_block, "Chapter 1"));
+        app.mode = Mode::BookmarkOverlay;
+        app.bookmark_state.select(Some(0));
+
+        app.handle_key(KeyEvent::from(KeyCode::Enter), size);
+
+        assert_eq!(app.current_page, 1);
+        assert_eq!(app.mode, Mode::Reading);
+    }
+
+    #[test]
+    fn save_shortcut_overwrites_single_bookmark_with_current_page_position() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(40, 8);
+        app.load_chapter(0, size);
+
+        app.current_page = 1;
+        app.handle_key(KeyEvent::from(KeyCode::Char('s')), size);
+        app.current_page = 2;
+        app.handle_key(KeyEvent::from(KeyCode::Char('s')), size);
+
+        let saved = app.bookmarks.for_book(BOOK_PATH);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].chapter, 0);
+        assert_eq!(saved[0].block_index, app.pages[2].first_block);
+    }
+
+    #[test]
+    fn quitting_persists_current_page_as_bookmark() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(40, 8);
+        app.load_chapter(0, size);
+        app.current_page = 2;
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('q')), size);
+
+        let saved = app.bookmarks.for_book(BOOK_PATH);
+        assert!(app.should_quit);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].block_index, app.pages[2].first_block);
     }
 }

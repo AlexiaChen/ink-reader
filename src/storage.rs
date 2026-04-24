@@ -84,16 +84,10 @@ impl BookmarkStore {
             .collect()
     }
 
-    /// Add a bookmark; deduplicate by (book_path, chapter, block_index).
+    /// Save a bookmark for a book, replacing any previous bookmark for that book.
     pub fn add(&mut self, bookmark: Bookmark) {
-        let already = self.bookmarks.iter().any(|b| {
-            b.book_path == bookmark.book_path
-                && b.chapter == bookmark.chapter
-                && b.block_index == bookmark.block_index
-        });
-        if !already {
-            self.bookmarks.push(bookmark);
-        }
+        self.bookmarks.retain(|b| b.book_path != bookmark.book_path);
+        self.bookmarks.push(bookmark);
     }
 
     /// Remove bookmark by index within the per-book list.
@@ -186,13 +180,29 @@ mod tests {
     }
 
     #[test]
-    fn remove_bookmark() {
+    fn save_overwrites_existing_bookmark_for_same_book() {
         let mut store = BookmarkStore {
             path: PathBuf::from("/tmp/test_bookmarks.json"),
             bookmarks: Vec::new(),
         };
         store.add(make_bookmark("/books/a.epub", 0, 0));
         store.add(make_bookmark("/books/a.epub", 1, 10));
+
+        let marks = store.for_book("/books/a.epub");
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].chapter, 1);
+        assert_eq!(marks[0].block_index, 10);
+    }
+
+    #[test]
+    fn remove_bookmark() {
+        let mut store = BookmarkStore {
+            path: PathBuf::from("/tmp/test_bookmarks.json"),
+            bookmarks: vec![
+                make_bookmark("/books/a.epub", 0, 0),
+                make_bookmark("/books/a.epub", 1, 10),
+            ],
+        };
         store.remove_for_book("/books/a.epub", 0);
         assert_eq!(store.for_book("/books/a.epub").len(), 1);
     }

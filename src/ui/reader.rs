@@ -152,7 +152,7 @@ fn build_anim_frame<'a>(anim: &'a AnimState, app: &'a App, height: usize) -> Vec
 }
 
 fn render_help(frame: &mut Frame, area: Rect) {
-    let help = " ↑ prev  ↓ next  n/p chapter  t ToC  b Bookmarks  a Add bookmark  q Quit";
+    let help = " ↑ prev  ↓ next  n/p chapter  t ToC  b Bookmarks  s Save bookmark  q Quit";
     let line = Line::from(Span::styled(
         help,
         Style::default().fg(Color::DarkGray).bg(Color::Black),

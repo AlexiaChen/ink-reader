@@ -41,14 +41,14 @@ falls back so reading still works in text-only environments.
 |---------|---------|
 | **Format support** | EPUB, TXT |
 | **Table of Contents** | Overlay (`t`) to jump to any chapter instantly |
-| **Bookmarks** | Add (`a`), browse (`b`), delete (`d`), jump to any bookmark |
+| **Bookmarks** | Save/overwrite (`s`), browse (`b`), delete (`d`), jump to the saved bookmark |
 | **Page navigation** | `↓` / `Space` next page · `↑` prev page |
 | **Chapter navigation** | `n` next chapter · `p` prev chapter |
 | **Page-flip animation** | Smooth fan-in/fan-out effect when turning pages |
 | **Paragraph indent** | 4-space first-line indent for comfortable reading |
 | **Cover art** | Displays EPUB covers in-terminal when image rendering is available |
 | **Inline illustrations** | Renders chapter images in place and keeps nearby captions with the figure |
-| **Persistent state** | Bookmarks saved to `~/.local/share/ink-reader/bookmarks.json` |
+| **Persistent state** | One bookmark per book, auto-saved on quit to `~/.local/share/ink-reader/bookmarks.json` |
 | **Responsive layout** | Reflows text automatically on terminal resize |
 
 ---
@@ -98,7 +98,7 @@ ink-reader <FILE>
 | `p` | Previous chapter |
 | `t` | Open Table of Contents |
 | `b` | Open Bookmarks |
-| `a` | Add bookmark at current position |
+| `s` | Save or overwrite the bookmark at the current position |
 | `q` / `Esc` / `Ctrl-c` | Quit |
 
 #### Table of Contents overlay (`t`)

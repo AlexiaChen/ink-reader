@@ -125,3 +125,11 @@
 - **Evidence**: `Cargo.toml`, `src/formats/mod.rs`, `README.md`, `AGENTS.md`
 - **Confidence**: 9/10
 - **Action**: 以后做格式退役或功能下线，按“入口 → 模块 → 依赖 → 文档 → 回归测试”顺序完整收口。
+
+### L-015: [convention] 书签必须持久化逻辑位置，不是页号或固定 0 (2026-04-24)
+- **Issue**: #60 — 修复书签的BUG
+- **Trigger**: bookmark, page restore, first_block, resize, book_path
+- **Pattern**: 书签如果只保存 `chapter`、或把 `block_index` 写死成 `0`，跳转时就只能回到章节开头，无法回到原 page。正确做法是用真实 `book_path` 作为书籍键，并持久化当前页的 `Page.first_block`；跳转时在重新分页后的 `pages` 里按 `first_block` 解析回目标页，这样 resize 后也能稳定恢复阅读位置。
+- **Evidence**: `src/app.rs:169-171`, `src/app.rs:286-294`, `src/app.rs:436-467`, `src/ui/bookmarks.rs:10-18`
+- **Confidence**: 10/10
+- **Action**: 以后改书签/阅读进度时，一律保存 `chapter + first_block + canonical book_path`，不要保存瞬时页号，也不要在 UI 和存储层各自发明不同的 book key。
