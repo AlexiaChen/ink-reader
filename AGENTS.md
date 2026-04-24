@@ -1,7 +1,7 @@
 # Ink Reader — Project Knowledge Base
 
 ## Overview
-Terminal TUI e-book reader written in Rust. Supports EPUB, MOBI, AZW3, TXT, PDF formats.
+Terminal TUI e-book reader written in Rust. Supports EPUB and TXT formats.
 Runs on Linux terminal with image display via Kitty/Sixel protocol.
 
 ## Architecture
@@ -15,8 +15,6 @@ src/
 ├── formats/
 │   ├── mod.rs        # BookReader trait definition
 │   ├── epub.rs       # EPUB parser (uses `epub` crate)
-│   ├── mobi.rs       # MOBI + AZW3 parser (uses `mobi` crate)
-│   ├── pdf.rs        # PDF text extraction (uses `pdf-extract`)
 │   └── txt.rs        # Plain text reader
 ├── ui/
 │   ├── mod.rs
@@ -82,9 +80,7 @@ Image bytes are stored raw at chapter load; full decode via `image::load_from_me
 | crossterm | 0.29 | Terminal backend |
 | ratatui-image | 10.x | Terminal image display (Kitty/Sixel/half-block) — use `Picker::halfblocks()` as fallback, NOT `Picker::new()` |
 | rbook | 0.7 | EPUB 2+3 parsing |
-| mobi | 0.8 | MOBI + AZW3 — `title()` returns `String`, `author()` returns `Option<String>` |
-| pdf_oxide | 0.3 | PDF text — `page_count()` returns `Result<usize>`, use `?` |
-| html2text | 0.17 | HTML→plain text for MOBI/EPUB content |
+| html2text | 0.17 | HTML→plain text for EPUB content |
 | textwrap | 0.16 | Word-wrap text to terminal width |
 | serde + serde_json | 1.x | Bookmark serialization |
 | dirs | 5.x | XDG paths (~/.local/share) |
@@ -113,10 +109,10 @@ cargo test
 - **Pagination**: Text is reflowed to terminal dimensions on resize
 - **Bookmarks**: Stored in `~/.local/share/ink-reader/bookmarks.json`
 - **Chapter navigation**: Popup ToC with selectable chapters
-- **Cover image**: Displayed on open for EPUB (manifest cover-image or id/href hint) and MOBI (first image record)
+- **Cover image**: Displayed on open for EPUB (manifest cover-image or id/href hint)
 - **Inline illustrations**: EPUB chapter illustrations rendered in-place; SVG/unsupported images shown as `[Image: alt]` placeholder
 - **Images**: Auto-detect terminal protocol; fallback to half-block if unsupported
-- **Formats**: EPUB, MOBI, AZW3, TXT, PDF
+- **Formats**: EPUB, TXT
 
 ## Code Conventions
 - Use `anyhow::Result` for all error handling in binary code

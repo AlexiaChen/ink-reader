@@ -109,3 +109,19 @@
 - **Evidence**: `src/app.rs` 与 `src/formats/epub.rs` 在加 workflow 前先修了 clippy blockers；`.github/workflows/ci.yml` 复用了同一套命令
 - **Confidence**: 10/10
 - **Action**: 设计 CI 时，先固定 gate 命令，再在本地连续跑通；只有命令链本地干净通过后，再把它们写进 workflow。
+
+### L-013: [convention] 删除格式支持时先切断扩展分派入口 (2026-04-24)
+- **Issue**: #56 — 删除mobi的支持
+- **Trigger**: format support, extension dispatch, load_reader, unsupported file format, reader reuse
+- **Pattern**: 当某个文件格式要退役，但底层 parser 仍服务同一格式族的其他扩展时，应先在 `load_reader()` 的扩展匹配层移除入口，而不是直接删除 parser 模块或 crate；并补一个针对该扩展的 Unsupported 回归测试来锁定行为。
+- **Evidence**: `src/formats/mod.rs`
+- **Confidence**: 9/10
+- **Action**: 以后做格式退役，先检查 parser 是否仍被其他扩展复用；若是，只改扩展分派并补回归测试。
+
+### L-014: [convention] 收缩支持矩阵时要同步删掉孤儿模块和依赖 (2026-04-24)
+- **Issue**: #57 — 删除PDF和azw3的支持
+- **Trigger**: support matrix, dependency pruning, parser module, format retirement, doc alignment
+- **Pattern**: 当产品支持的文件格式收缩到更小集合时，不能只改扩展分派；还要同步删除失去入口的 parser 模块、crate 依赖，以及 README/AGENTS 等对外和对内知识源里的对应描述，避免代码、依赖和文档三方漂移。
+- **Evidence**: `Cargo.toml`, `src/formats/mod.rs`, `README.md`, `AGENTS.md`
+- **Confidence**: 9/10
+- **Action**: 以后做格式退役或功能下线，按“入口 → 模块 → 依赖 → 文档 → 回归测试”顺序完整收口。

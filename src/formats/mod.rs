@@ -5,8 +5,6 @@ use anyhow::{Result, bail};
 use crate::book::BookReader;
 
 mod epub;
-mod mobi;
-mod pdf;
 mod txt;
 
 /// Detect format from file extension and return the appropriate reader.
@@ -21,15 +19,7 @@ pub fn load_reader(path: &Path) -> Result<Box<dyn BookReader>> {
             let reader = epub::EpubReader::open(path)?;
             Ok(Box::new(reader))
         }
-        Some("mobi") | Some("azw") | Some("azw3") | Some("prc") => {
-            let reader = mobi::MobiReader::open(path)?;
-            Ok(Box::new(reader))
-        }
-        Some("pdf") => {
-            let reader = pdf::PdfReader::open(path)?;
-            Ok(Box::new(reader))
-        }
-        Some("txt") | Some("md") => {
+        Some("txt") => {
             let reader = txt::TxtReader::open(path)?;
             Ok(Box::new(reader))
         }
@@ -37,5 +27,29 @@ pub fn load_reader(path: &Path) -> Result<Box<dyn BookReader>> {
             "Unsupported file format: {}",
             other.unwrap_or("(no extension)")
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    #[test]
+    fn only_epub_and_text_extensions_are_supported() {
+        for ext in ["mobi", "azw", "azw3", "prc", "pdf", "md"] {
+            let mut file = tempfile::Builder::new()
+                .suffix(&format!(".{ext}"))
+                .tempfile()
+                .unwrap();
+            writeln!(file, "placeholder").unwrap();
+
+            let err = match load_reader(file.path()) {
+                Ok(_) => panic!("expected .{ext} to be unsupported"),
+                Err(err) => err,
+            };
+            assert_eq!(err.to_string(), format!("Unsupported file format: {ext}"));
+        }
     }
 }

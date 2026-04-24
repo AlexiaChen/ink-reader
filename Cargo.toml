@@ -2,7 +2,7 @@
 name = "ink-reader"
 version = "0.1.0"
 edition = "2024"
-description = "Ink on the terminal — read epubs, mobi, azw3, pdf, txt"
+description = "Ink on the terminal — read epubs and txt in the terminal"
 
 [[bin]]
 name = "ink-reader"
@@ -11,8 +11,6 @@ path = "src/main.rs"
 [dependencies]
 # Format readers
 rbook = "0.7"
-mobi = "0.8"
-pdf_oxide = "0.3"
 html2text = "0.17"
 
 # TUI

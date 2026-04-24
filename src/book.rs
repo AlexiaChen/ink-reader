@@ -6,7 +6,7 @@ use anyhow::Result;
 pub struct Chapter {
     pub index: usize,
     pub title: String,
-    /// Internal resource identifier (EPUB href, PDF page string, etc.)
+    /// Internal resource identifier (EPUB href, source path, etc.)
     pub resource_id: String,
 }
 

@@ -3,8 +3,8 @@
 > Ink on the terminal — read ebooks in your terminal.
 
 A fast, keyboard-driven TUI e-book reader for Linux/macOS built with Rust and
-[Ratatui](https://github.com/ratatui/ratatui). Open EPUB, MOBI, AZW3, PDF,
-and plain-text files without leaving the command line. It now renders book
+[Ratatui](https://github.com/ratatui/ratatui). Open EPUB and TXT files without
+leaving the command line. It now renders book
 cover art and inline illustrations directly inside supported terminals.
 
 ![Rust](https://img.shields.io/badge/rust-2024_edition-orange)
@@ -39,14 +39,14 @@ falls back so reading still works in text-only environments.
 
 | Feature | Details |
 |---------|---------|
-| **Format support** | EPUB, MOBI, AZW3, PDF, TXT |
+| **Format support** | EPUB, TXT |
 | **Table of Contents** | Overlay (`t`) to jump to any chapter instantly |
 | **Bookmarks** | Add (`a`), browse (`b`), delete (`d`), jump to any bookmark |
 | **Page navigation** | `↓` / `Space` next page · `↑` prev page |
 | **Chapter navigation** | `n` next chapter · `p` prev chapter |
 | **Page-flip animation** | Smooth fan-in/fan-out effect when turning pages |
 | **Paragraph indent** | 4-space first-line indent for comfortable reading |
-| **Cover art** | Displays EPUB and MOBI covers in-terminal when image rendering is available |
+| **Cover art** | Displays EPUB covers in-terminal when image rendering is available |
 | **Inline illustrations** | Renders chapter images in place and keeps nearby captions with the figure |
 | **Persistent state** | Bookmarks saved to `~/.local/share/ink-reader/bookmarks.json` |
 | **Responsive layout** | Reflows text automatically on terminal resize |
@@ -164,8 +164,6 @@ src/
 ├── book.rs          # Core types, pagination, text-wrapping
 ├── formats/
 │   ├── epub.rs      # EPUB reader (rbook)
-│   ├── mobi.rs      # MOBI / AZW3 reader (mobi crate)
-│   ├── pdf.rs       # PDF reader (pdf_oxide)
 │   └── txt.rs       # Plain-text reader
 ├── storage.rs       # Bookmark persistence (JSON via serde)
 └── ui/
@@ -182,8 +180,6 @@ src/
 | `crossterm` | Cross-platform terminal control |
 | `ratatui-image` | Inline image rendering |
 | `rbook` | EPUB parsing |
-| `mobi` | MOBI / AZW3 parsing |
-| `pdf_oxide` | PDF parsing |
 | `html2text` | HTML-to-plain-text for EPUB content |
 | `textwrap` | Unicode-aware text wrapping with indent support |
 | `clap` | CLI argument parsing |
