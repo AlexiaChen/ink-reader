@@ -191,11 +191,9 @@ impl App {
                 }
             }
             // Previous chapter
-            KeyCode::Char('p') => {
-                if self.current_chapter > 0 {
-                    let prev = self.current_chapter - 1;
-                    self.load_chapter(prev, size);
-                }
+            KeyCode::Char('p') if self.current_chapter > 0 => {
+                let prev = self.current_chapter - 1;
+                self.load_chapter(prev, size);
             }
             // Toggle ToC
             KeyCode::Char('t') => {
