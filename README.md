@@ -8,6 +8,7 @@ and plain-text files without leaving the command line. It now renders book
 cover art and inline illustrations directly inside supported terminals.
 
 ![Rust](https://img.shields.io/badge/rust-2024_edition-orange)
+[![CI](https://github.com/AlexiaChen/ink-reader/actions/workflows/ci.yml/badge.svg)](https://github.com/AlexiaChen/ink-reader/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
