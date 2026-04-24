@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 use ratatui_image::StatefulImage;
 use ratatui_image::protocol::StatefulProtocol;
@@ -59,15 +59,44 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
 fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
     // Render an image page (cover or embedded in-chapter image).
     if let Some(ref mut proto) = app.current_image {
-        frame.render_stateful_widget(StatefulImage::<StatefulProtocol>::default(), area, proto);
+        let caption: Vec<Line> = app
+            .pages
+            .get(app.current_page)
+            .map(|page| {
+                page.lines
+                    .iter()
+                    .map(|line| Line::from(line.as_str()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let caption_height = (caption.len() as u16).min(area.height.saturating_sub(1));
+        if caption_height == 0 {
+            frame.render_stateful_widget(StatefulImage::<StatefulProtocol>::default(), area, proto);
+            return;
+        }
+
+        let chunks =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(caption_height)]).split(area);
+
+        frame.render_stateful_widget(
+            StatefulImage::<StatefulProtocol>::default(),
+            chunks[0],
+            proto,
+        );
+        frame.render_widget(
+            Paragraph::new(caption)
+                .block(Block::default().borders(Borders::NONE))
+                .wrap(Wrap { trim: false }),
+            chunks[1],
+        );
         return;
     }
 
     // Cover with no displayable image (e.g. terminal lacks graphics support).
     if app.showing_cover {
-        let placeholder =
-            Paragraph::new("[ Cover image — press → to start reading ]")
-                .block(Block::default().borders(Borders::NONE));
+        let placeholder = Paragraph::new("[ Cover image — press → to start reading ]")
+            .block(Block::default().borders(Borders::NONE));
         frame.render_widget(placeholder, area);
         return;
     }
@@ -79,12 +108,7 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         app.pages
             .get(app.current_page)
-            .map(|page| {
-                page.lines
-                    .iter()
-                    .map(|l| Line::from(l.as_str()))
-                    .collect()
-            })
+            .map(|page| page.lines.iter().map(|l| Line::from(l.as_str())).collect())
             .unwrap_or_default()
     };
 
@@ -100,7 +124,8 @@ fn build_anim_frame<'a>(anim: &'a AnimState, app: &'a App, height: usize) -> Vec
     let elapsed_ms = anim.start.elapsed().as_millis() as u64;
     let ratio = (elapsed_ms as f32 / anim.duration_ms as f32).clamp(0.0, 1.0);
 
-    let new_lines = app.pages
+    let new_lines = app
+        .pages
         .get(app.current_page)
         .map(|p| p.lines.as_slice())
         .unwrap_or(&[]);
@@ -130,9 +155,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
     let help = " ↑ prev  ↓ next  n/p chapter  t ToC  b Bookmarks  a Add bookmark  q Quit";
     let line = Line::from(Span::styled(
         help,
-        Style::default()
-            .fg(Color::DarkGray)
-            .bg(Color::Black),
+        Style::default().fg(Color::DarkGray).bg(Color::Black),
     ));
     frame.render_widget(Paragraph::new(line), area);
 }

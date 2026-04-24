@@ -25,7 +25,10 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    let canonical = args.file.canonicalize().unwrap_or_else(|_| args.file.clone());
+    let canonical = args
+        .file
+        .canonicalize()
+        .unwrap_or_else(|_| args.file.clone());
 
     let reader = formats::load_reader(&canonical)?;
 

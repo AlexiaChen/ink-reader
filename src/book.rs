@@ -24,8 +24,15 @@ pub struct BookMeta {
 #[allow(dead_code)]
 pub enum ContentBlock {
     Paragraph(String),
-    Heading { level: u8, text: String },
-    Image { data: Vec<u8>, alt: String, mime: String },
+    Heading {
+        level: u8,
+        text: String,
+    },
+    Image {
+        data: Vec<u8>,
+        alt: String,
+        mime: String,
+    },
     PageBreak,
 }
 
@@ -95,10 +102,10 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
     let mut cur_image: Option<PageImage> = None;
 
     let flush = |pages: &mut Vec<Page>,
-                     lines: &mut Vec<String>,
-                     first: &mut usize,
-                     img: &mut Option<PageImage>,
-                     next_first: usize| {
+                 lines: &mut Vec<String>,
+                 first: &mut usize,
+                 img: &mut Option<PageImage>,
+                 next_first: usize| {
         if !lines.is_empty() || img.is_some() {
             pages.push(Page {
                 lines: std::mem::take(lines),
@@ -109,12 +116,19 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
         }
     };
 
-    for (block_idx, block) in blocks.iter().enumerate() {
+    let mut block_idx = 0usize;
+    while let Some(block) = blocks.get(block_idx) {
         match block {
             ContentBlock::Paragraph(text) => {
                 for line in wrap_paragraph(text, wrap_w) {
                     if cur_lines.len() >= page_h {
-                        flush(&mut pages, &mut cur_lines, &mut cur_first, &mut cur_image, block_idx);
+                        flush(
+                            &mut pages,
+                            &mut cur_lines,
+                            &mut cur_first,
+                            &mut cur_image,
+                            block_idx,
+                        );
                     }
                     cur_lines.push(line);
                 }
@@ -122,6 +136,7 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                 if cur_lines.len() < page_h {
                     cur_lines.push(String::new());
                 }
+                block_idx += 1;
             }
             ContentBlock::Heading { level, text } => {
                 let marker = "#".repeat((*level).clamp(1, 6) as usize);
@@ -129,13 +144,25 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                 // Blank line before heading
                 if !cur_lines.is_empty() {
                     if cur_lines.len() >= page_h {
-                        flush(&mut pages, &mut cur_lines, &mut cur_first, &mut cur_image, block_idx);
+                        flush(
+                            &mut pages,
+                            &mut cur_lines,
+                            &mut cur_first,
+                            &mut cur_image,
+                            block_idx,
+                        );
                     }
                     cur_lines.push(String::new());
                 }
                 for line in wrap_text(&heading, wrap_w) {
                     if cur_lines.len() >= page_h {
-                        flush(&mut pages, &mut cur_lines, &mut cur_first, &mut cur_image, block_idx);
+                        flush(
+                            &mut pages,
+                            &mut cur_lines,
+                            &mut cur_first,
+                            &mut cur_image,
+                            block_idx,
+                        );
                     }
                     cur_lines.push(line);
                 }
@@ -143,18 +170,57 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                 if cur_lines.len() < page_h {
                     cur_lines.push(String::new());
                 }
+                block_idx += 1;
             }
             ContentBlock::Image { data, alt, mime } => {
-                // Flush current text, then give image its own page
-                flush(&mut pages, &mut cur_lines, &mut cur_first, &mut cur_image, block_idx);
-                cur_image = Some(PageImage {
-                    data: data.clone(),
-                    mime: mime.clone(),
-                    alt: alt.clone(),
+                // Flush current text, then give image its own page.
+                flush(
+                    &mut pages,
+                    &mut cur_lines,
+                    &mut cur_first,
+                    &mut cur_image,
+                    block_idx,
+                );
+
+                let mut caption_lines = Vec::new();
+                let mut next_idx = block_idx + 1;
+                let mut saw_primary_caption = false;
+
+                while let Some(text) = blocks
+                    .get(next_idx)
+                    .and_then(|next| image_caption_text(next, saw_primary_caption))
+                {
+                    saw_primary_caption = true;
+                    caption_lines.extend(wrap_text(&text, wrap_w));
+                    caption_lines.push(String::new());
+                    next_idx += 1;
+                }
+
+                if matches!(caption_lines.last(), Some(last) if last.is_empty()) {
+                    caption_lines.pop();
+                }
+
+                pages.push(Page {
+                    lines: caption_lines,
+                    image: Some(PageImage {
+                        data: data.clone(),
+                        mime: mime.clone(),
+                        alt: alt.clone(),
+                    }),
+                    first_block: block_idx,
                 });
+                cur_first = next_idx;
+                block_idx = next_idx;
             }
             ContentBlock::PageBreak => {
-                flush(&mut pages, &mut cur_lines, &mut cur_first, &mut cur_image, block_idx + 1);
+                flush(
+                    &mut pages,
+                    &mut cur_lines,
+                    &mut cur_first,
+                    &mut cur_image,
+                    block_idx + 1,
+                );
+                block_idx += 1;
             }
         }
     }
@@ -214,6 +280,90 @@ fn wrap_with_opts(text: &str, width: usize, initial: &str, subsequent: &str) -> 
     result
 }
 
+fn image_caption_text(block: &ContentBlock, saw_primary_caption: bool) -> Option<String> {
+    let text = match block {
+        ContentBlock::Paragraph(text) => normalize_image_caption(text),
+        ContentBlock::Heading { text, .. } => normalize_image_caption(text),
+        _ => return None,
+    };
+
+    if text.is_empty() {
+        return None;
+    }
+
+    if !saw_primary_caption {
+        is_primary_image_caption(&text).then_some(text)
+    } else {
+        is_secondary_image_caption(&text).then_some(text)
+    }
+}
+
+fn normalize_image_caption(text: &str) -> String {
+    text.trim().trim_start_matches('#').trim().to_string()
+}
+
+fn is_primary_image_caption(text: &str) -> bool {
+    looks_like_cjk_caption_label(text, '图')
+        || looks_like_cjk_caption_label(text, '表')
+        || looks_like_ascii_caption_prefix(text)
+}
+
+fn is_secondary_image_caption(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with('(')
+        || trimmed.starts_with('（')
+        || trimmed.starts_with('[')
+        || trimmed.starts_with("来源")
+        || trimmed.to_ascii_lowercase().starts_with("source")
+}
+
+fn looks_like_cjk_caption_label(text: &str, prefix: char) -> bool {
+    let Some(rest) = text.strip_prefix(prefix) else {
+        return false;
+    };
+
+    let rest = rest.trim_start_matches([' ', '　']);
+    matches!(
+        rest.chars().next(),
+        Some(c)
+            if c.is_ascii_digit()
+                || matches!(
+                    c,
+                    '０'..='９'
+                        | '〇'
+                        | '零'
+                        | '一'
+                        | '二'
+                        | '三'
+                        | '四'
+                        | '五'
+                        | '六'
+                        | '七'
+                        | '八'
+                        | '九'
+                        | '十'
+                        | '百'
+                        | '千'
+                        | '甲'
+                        | '乙'
+                        | '丙'
+                        | '丁'
+                        | '上'
+                        | '中'
+                        | '下'
+                )
+    )
+}
+
+fn looks_like_ascii_caption_prefix(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    [
+        "figure ", "figure:", "fig. ", "fig ", "table ", "table:", "image ", "map ", "plate ",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,7 +382,10 @@ mod tests {
             .collect();
         let pages = paginate_blocks(&blocks, 80, 10);
         // Each paragraph is one line; page_h = 7
-        assert!(pages.len() > 1, "content should be split across multiple pages");
+        assert!(
+            pages.len() > 1,
+            "content should be split across multiple pages"
+        );
     }
 
     #[test]
@@ -268,6 +421,83 @@ mod tests {
             first_line.starts_with("    "),
             "CJK paragraph first line must have 4-space indent, got: {:?}",
             first_line
+        );
+    }
+
+    #[test]
+    fn image_page_keeps_following_caption_blocks() {
+        let blocks = vec![
+            ContentBlock::Image {
+                data: vec![1, 2, 3],
+                alt: String::new(),
+                mime: "image/jpeg".to_string(),
+            },
+            ContentBlock::Paragraph("#### 图1 安史之乱前期河南节度使所辖十三州".to_string()),
+            ContentBlock::Paragraph("##### （此图以《中国历史地图集》为底图改绘）".to_string()),
+            ContentBlock::Paragraph("这里才是后续正文。".to_string()),
+        ];
+
+        let pages = paginate_blocks(&blocks, 80, 24);
+        assert!(
+            pages[0].image.is_some(),
+            "first page should still be an image page"
+        );
+        assert!(
+            pages[0]
+                .lines
+                .iter()
+                .any(|line| line.contains("图1 安史之乱前期河南节度使所辖十三州")),
+            "image page should keep the primary caption, got: {:?}",
+            pages[0].lines
+        );
+        assert!(
+            pages[0].lines.iter().any(|line| line.contains("底图改绘")),
+            "image page should keep the secondary caption, got: {:?}",
+            pages[0].lines
+        );
+        assert!(
+            pages.iter().skip(1).any(|page| page
+                .lines
+                .iter()
+                .any(|line| line.contains("这里才是后续正文"))),
+            "body text must remain after the image page"
+        );
+    }
+
+    #[test]
+    fn regular_paragraph_after_image_is_not_treated_as_caption() {
+        let blocks = vec![
+            ContentBlock::Image {
+                data: vec![1, 2, 3],
+                alt: String::new(),
+                mime: "image/jpeg".to_string(),
+            },
+            ContentBlock::Paragraph("这里是普通正文，不是图注。".to_string()),
+        ];
+
+        let pages = paginate_blocks(&blocks, 80, 24);
+        assert!(pages[0].image.is_some());
+        assert!(
+            pages[0].lines.is_empty(),
+            "plain body text must not stay on the image page: {:?}",
+            pages[0].lines
+        );
+        assert!(
+            pages.iter().skip(1).any(|page| page
+                .lines
+                .iter()
+                .any(|line| line.contains("这里是普通正文"))),
+            "plain body text should remain in later text pages"
+        );
+    }
+
+    #[test]
+    fn image_caption_text_strips_heading_markers() {
+        let block =
+            ContentBlock::Paragraph("#### 图1 安史之乱前期河南节度使所辖十三州".to_string());
+        assert_eq!(
+            image_caption_text(&block, false).as_deref(),
+            Some("图1 安史之乱前期河南节度使所辖十三州")
         );
     }
 }

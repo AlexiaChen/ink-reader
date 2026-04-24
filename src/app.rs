@@ -6,7 +6,7 @@ use ratatui::layout::Size;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 
-use crate::book::{paginate_blocks, BookReader, ContentBlock, Page, PaginationKey};
+use crate::book::{BookReader, ContentBlock, Page, PaginationKey, paginate_blocks};
 use crate::storage::{Bookmark, BookmarkStore};
 
 /// State for a running page-flip animation.
@@ -98,14 +98,18 @@ impl App {
             return;
         }
 
-        let blocks = self
-            .reader
-            .chapter_blocks(chapter_idx)
-            .unwrap_or_else(|_| vec![ContentBlock::Paragraph("[Error loading chapter]".to_string())]);
+        let blocks = self.reader.chapter_blocks(chapter_idx).unwrap_or_else(|_| {
+            vec![ContentBlock::Paragraph(
+                "[Error loading chapter]".to_string(),
+            )]
+        });
 
         self.pages = paginate_blocks(&blocks, size.width, size.height);
         if self.pages.is_empty() {
-            self.pages = vec![Page { lines: vec!["[Empty chapter]".to_string()], ..Page::default() }];
+            self.pages = vec![Page {
+                lines: vec!["[Empty chapter]".to_string()],
+                ..Page::default()
+            }];
         }
 
         self.current_chapter = chapter_idx;
@@ -159,8 +163,7 @@ impl App {
     fn handle_key_reading(&mut self, key: KeyEvent, size: Size) {
         // Quit always works, even during animation
         if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
-            || (key.code == KeyCode::Char('c')
-                && key.modifiers.contains(KeyModifiers::CONTROL))
+            || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
         {
             self.should_quit = true;
             return;
@@ -327,10 +330,15 @@ impl App {
             return;
         }
 
-        let old_has_image =
-            self.pages.get(self.current_page).map_or(false, |p| p.image.is_some());
-        let old_lines =
-            self.pages.get(self.current_page).map(|p| p.lines.clone()).unwrap_or_default();
+        let old_has_image = self
+            .pages
+            .get(self.current_page)
+            .map_or(false, |p| p.image.is_some());
+        let old_lines = self
+            .pages
+            .get(self.current_page)
+            .map(|p| p.lines.clone())
+            .unwrap_or_default();
 
         let moved = if self.current_page + 1 < self.pages.len() {
             self.current_page += 1;
@@ -377,10 +385,15 @@ impl App {
             return;
         }
 
-        let old_has_image =
-            self.pages.get(self.current_page).map_or(false, |p| p.image.is_some());
-        let old_lines =
-            self.pages.get(self.current_page).map(|p| p.lines.clone()).unwrap_or_default();
+        let old_has_image = self
+            .pages
+            .get(self.current_page)
+            .map_or(false, |p| p.image.is_some());
+        let old_lines = self
+            .pages
+            .get(self.current_page)
+            .map(|p| p.lines.clone())
+            .unwrap_or_default();
 
         let moved = if self.current_page > 0 {
             self.current_page -= 1;

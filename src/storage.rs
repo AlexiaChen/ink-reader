@@ -119,7 +119,10 @@ impl BookmarkStore {
         } else {
             Vec::new()
         };
-        Ok(Self { path: path.clone(), bookmarks })
+        Ok(Self {
+            path: path.clone(),
+            bookmarks,
+        })
     }
 
     /// Persist to disk.
@@ -198,7 +201,10 @@ mod tests {
     fn round_trip_serialization() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_path_buf();
-        let mut store = BookmarkStore { path: path.clone(), bookmarks: Vec::new() };
+        let mut store = BookmarkStore {
+            path: path.clone(),
+            bookmarks: Vec::new(),
+        };
         store.add(make_bookmark("/books/a.epub", 2, 5));
         store.save().unwrap();
 

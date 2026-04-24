@@ -47,6 +47,11 @@ pub trait BookReader {
 - `paginate_blocks(blocks, width, height)` — reflow ContentBlocks into pages.
 
 ### EPUB Inline Image Extraction (epub.rs)
+`collect_chapters()` must follow the **EPUB spine**, not just top-level ToC entries. The ToC is only a
+title source: flatten it, strip fragments, and let the **first label for each XHTML resource** name the
+spine chapter. This matters for books whose NCX nests multiple section anchors inside one spine document
+(for example `Text/Section0001.xhtml#hh2-1`).
+
 `chapter_blocks()` uses a **sentinel injection** pattern to preserve image position through html2text:
 1. Scan raw HTML for `<img>` tags → collect `(src, alt)` pairs (`extract_img_tags`)
 2. Replace each `<img>` with `</p><p>__INKIMG_N__</p><p>` in the HTML string
@@ -54,11 +59,17 @@ pub trait BookReader {
 4. Split result on `\n\n`; swap `__INKIMG_N__` paragraphs back to `ContentBlock::Image`
 5. Failed/unsupported (SVG) images emit `[Image: alt]` placeholder paragraph
 
+Image pages may also carry **caption lines** in `Page.lines`: `paginate_blocks()` keeps the
+immediate figure/table caption blocks (for example `图1 …` plus following parenthetical source note)
+with the image page, and `ui/reader.rs` renders those lines **below** the image instead of treating
+them as normal body paragraphs.
+
 Helper functions (module-level in epub.rs):
 - `extract_img_tags(html)` → `Vec<(src, alt)>` — case-insensitive, handles `data-src` shadowing
 - `extract_attr(tag, attr)` → `Option<String>` — iterates all occurrences to skip false matches
 - `resolve_href(chapter_href, img_src)` — handles `./`, `../` (clamped), fragment, external URLs
 - `normalize_path(path)` — strips `.`, resolves `..` without going above root
+- `resource_path(resource_id)` — strips fragment suffix before `read_resource_bytes()`
 - `parse_img_sentinel(para)` — detects `__INKIMG_N__` paragraphs, returns index N
 
 Image bytes are stored raw at chapter load; full decode via `image::load_from_memory` is deferred to display time in `refresh_current_image()` to avoid decompression-bomb risk.

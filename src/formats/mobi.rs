@@ -23,8 +23,7 @@ impl MobiReader {
 
         // Decode content — the crate returns HTML
         let html = m.content_as_string().unwrap_or_default();
-        let text = html2text::from_read(html.as_bytes(), 80)
-            .unwrap_or_else(|_| html.clone());
+        let text = html2text::from_read(html.as_bytes(), 80).unwrap_or_else(|_| html.clone());
 
         // Extract cover image: first image record is conventionally the cover
         let cover = {
@@ -35,7 +34,9 @@ impl MobiReader {
                 if mime == "image/unknown" {
                     return None;
                 }
-                image::load_from_memory(&data).ok().map(|_| (data, mime.to_string()))
+                image::load_from_memory(&data)
+                    .ok()
+                    .map(|_| (data, mime.to_string()))
             })
         };
 

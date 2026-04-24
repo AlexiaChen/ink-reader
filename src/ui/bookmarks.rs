@@ -1,8 +1,8 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Clear, List, ListItem},
-    Frame,
 };
 
 use crate::app::App;
@@ -23,17 +23,15 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(Clear, popup);
 
     let items: Vec<ListItem> = if bmarks.is_empty() {
-        vec![ListItem::new("  (no bookmarks — press 'a' in reading mode)")]
+        vec![ListItem::new(
+            "  (no bookmarks — press 'a' in reading mode)",
+        )]
     } else {
         bmarks
             .iter()
             .enumerate()
             .map(|(i, bm)| {
-                let label = format!(
-                    " #{i}  Ch.{} block {}",
-                    bm.chapter + 1,
-                    bm.block_index
-                );
+                let label = format!(" #{i}  Ch.{} block {}", bm.chapter + 1, bm.block_index);
                 ListItem::new(label)
             })
             .collect()
