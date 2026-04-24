@@ -139,10 +139,10 @@ impl App {
             return;
         };
 
-        if let Ok(dyn_img) = image::load_from_memory(&bytes) {
-            if let Some(picker) = &self.picker {
-                self.current_image = Some(picker.new_resize_protocol(dyn_img));
-            }
+        if let Ok(dyn_img) = image::load_from_memory(&bytes)
+            && let Some(picker) = &self.picker
+        {
+            self.current_image = Some(picker.new_resize_protocol(dyn_img));
         }
     }
 
@@ -333,7 +333,7 @@ impl App {
         let old_has_image = self
             .pages
             .get(self.current_page)
-            .map_or(false, |p| p.image.is_some());
+            .is_some_and(|p| p.image.is_some());
         let old_lines = self
             .pages
             .get(self.current_page)
@@ -388,7 +388,7 @@ impl App {
         let old_has_image = self
             .pages
             .get(self.current_page)
-            .map_or(false, |p| p.image.is_some());
+            .is_some_and(|p| p.image.is_some());
         let old_lines = self
             .pages
             .get(self.current_page)
@@ -423,10 +423,10 @@ impl App {
 
     /// Expire completed animations (call once per event-loop iteration).
     pub fn tick_anim(&mut self) {
-        if let Some(a) = &self.anim {
-            if a.start.elapsed().as_millis() as u64 >= a.duration_ms {
-                self.anim = None;
-            }
+        if let Some(a) = &self.anim
+            && a.start.elapsed().as_millis() as u64 >= a.duration_ms
+        {
+            self.anim = None;
         }
     }
 }

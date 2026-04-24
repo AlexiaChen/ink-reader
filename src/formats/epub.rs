@@ -325,15 +325,13 @@ fn extract_attr(tag: &str, attr: &str) -> Option<String> {
         };
         if prev_ok {
             let rest = &tag[abs + search.len()..];
-            return if rest.starts_with('"') {
-                rest[1..]
-                    .find('"')
-                    .and_then(|e| rest.get(1..1 + e))
+            return if let Some(rest) = rest.strip_prefix('"') {
+                rest.find('"')
+                    .and_then(|e| rest.get(..e))
                     .map(str::to_string)
-            } else if rest.starts_with('\'') {
-                rest[1..]
-                    .find('\'')
-                    .and_then(|e| rest.get(1..1 + e))
+            } else if let Some(rest) = rest.strip_prefix('\'') {
+                rest.find('\'')
+                    .and_then(|e| rest.get(..e))
                     .map(str::to_string)
             } else {
                 let end = rest
@@ -364,7 +362,7 @@ fn resolve_href(chapter_href: &str, img_src: &str) -> String {
         return String::new(); // external images are not supported in TUI reader
     }
     // Strip any fragment suffix from the src path.
-    let src_path = src.splitn(2, '#').next().unwrap_or(src);
+    let src_path = src.split('#').next().unwrap_or(src);
     if src_path.is_empty() {
         return String::new();
     }

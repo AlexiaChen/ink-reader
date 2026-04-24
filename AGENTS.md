@@ -94,6 +94,8 @@ Image bytes are stored raw at chapter load; full decode via `image::load_from_me
 ## Build & Run
 
 ```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
 cargo build
 cargo run -- /path/to/book.epub
 cargo test

@@ -100,6 +100,12 @@ ink-reader <FILE>
 ## Build & Development
 
 ```bash
+# Check formatting
+cargo fmt --check
+
+# Run clippy with CI-level strictness
+cargo clippy --all-targets -- -D warnings
+
 # Build (also runs clippy)
 make build
 
@@ -112,6 +118,15 @@ make install
 # Remove build artifacts
 make clean
 ```
+
+## CI
+
+GitHub Actions runs on pull requests and pushes to `master`, checking:
+
+- `cargo fmt --check`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test`
+- `cargo build --release`
 
 ---
 
@@ -154,4 +169,3 @@ src/
 ## License
 
 MIT — see [LICENSE](LICENSE).
-

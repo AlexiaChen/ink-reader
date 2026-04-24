@@ -85,3 +85,27 @@
 - **Evidence**: `src/book.rs` `detect_image_mime()`, `src/formats/mobi.rs`
 - **Confidence**: 9/10
 - **Action**: Import `crate::book::detect_image_mime` in all format readers. Never write a local `detect_mime` again.
+
+### L-010: [architecture] EPUB 顺序阅读必须跟随 spine，不是顶层 ToC (2026-04-24)
+- **Issue**: #54 — 插图的图片还是不显示
+- **Trigger**: epub, spine, toc, ncx, nested navPoint, section0001, chapter order
+- **Pattern**: 对顺序阅读来说，canonical reading order 来自 EPUB spine。NCX/ToC 可用于导航和命名，但不能直接拿顶层 navPoint 当阅读序列；否则像 `Text/Section0001.xhtml#hh2-1` 这种嵌套目录对应的正文文档会被整段跳过。
+- **Evidence**: `src/formats/epub.rs` `collect_chapters()`
+- **Confidence**: 10/10
+- **Action**: 章节列表先按 spine 生成，再用扁平化 ToC 的首个 label 为每个 XHTML 资源命名；读取资源前剥掉 `#fragment`。
+
+### L-011: [gotcha] 图片页如果只渲染图片，会把 caption 和正文一起吞掉 (2026-04-24)
+- **Issue**: #54 — 插图的图片还是不显示
+- **Trigger**: image page, caption, figure title, ui render, Page.lines, ratatui-image
+- **Pattern**: 如果分页允许 image page 同时携带 `Page.lines`，但 UI 在检测到图片后直接 early-return 只画图，那么紧随图片的 caption 甚至正文都会被视觉上“丢失”。
+- **Evidence**: `src/book.rs` `paginate_blocks()` 与 `src/ui/reader.rs` `render_content()`
+- **Confidence**: 9/10
+- **Action**: 图片页要么只保留图片+caption 并在 UI 一起渲染，要么在分页阶段把后续正文显式拆到下一页，不能让 image page 隐式吞文本。
+
+### L-012: [convention] 给 Rust 项目加 CI 前，先本地跑完整 gate 命令链 (2026-04-24)
+- **Issue**: #55 — 加入github action
+- **Trigger**: github actions, ci, clippy, fmt, cargo build, cargo test, workflow
+- **Pattern**: 对 Rust 项目补 CI 时，真正的 blocker 往往不是 workflow YAML，而是仓库当前是否已经满足 `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`、`cargo build --release` 这些 gate。先本地跑完整命令链，才能避免把已有 lint debt 直接“上传成红灯 CI”。
+- **Evidence**: `src/app.rs` 与 `src/formats/epub.rs` 在加 workflow 前先修了 clippy blockers；`.github/workflows/ci.yml` 复用了同一套命令
+- **Confidence**: 10/10
+- **Action**: 设计 CI 时，先固定 gate 命令，再在本地连续跑通；只有命令链本地干净通过后，再把它们写进 workflow。
