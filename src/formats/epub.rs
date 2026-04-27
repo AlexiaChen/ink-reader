@@ -13,11 +13,18 @@ pub struct EpubReader {
     epub: Epub,
     meta: BookMeta,
     cover: Option<(Vec<u8>, String)>,
+    section_labels: HashMap<String, Vec<SectionLabel>>,
 }
 
 struct ReferenceReplacement {
     range: Range<usize>,
     replacement_html: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SectionLabel {
+    fragment: String,
+    title: String,
 }
 
 impl EpubReader {
@@ -37,7 +44,9 @@ impl EpubReader {
             .map(|e| e.value().to_string());
 
         let cover = Self::extract_cover(&epub);
-        let chapters = Self::collect_chapters(&epub);
+        let toc_titles = Self::collect_toc_titles(&epub);
+        let section_labels = Self::collect_toc_section_labels(&epub);
+        let chapters = Self::collect_chapters(&epub, &toc_titles, &section_labels);
 
         let meta = BookMeta {
             title,
@@ -45,7 +54,12 @@ impl EpubReader {
             chapters,
         };
 
-        Ok(Self { epub, meta, cover })
+        Ok(Self {
+            epub,
+            meta,
+            cover,
+            section_labels,
+        })
     }
 
     /// Extract the cover image from the EPUB manifest.
@@ -89,15 +103,19 @@ impl EpubReader {
         })
     }
 
-    fn collect_chapters(epub: &Epub) -> Vec<Chapter> {
-        let toc_titles = Self::collect_toc_titles(epub);
+    fn collect_chapters(
+        epub: &Epub,
+        toc_titles: &HashMap<String, String>,
+        section_labels: &HashMap<String, Vec<SectionLabel>>,
+    ) -> Vec<Chapter> {
         let out = build_chapters_from_spine(
             epub.spine().iter().filter_map(|entry| {
                 entry
                     .manifest_entry()
                     .map(|manifest| (manifest.href_raw().as_ref().to_string(), entry.is_linear()))
             }),
-            &toc_titles,
+            toc_titles,
+            section_labels,
         );
 
         if !out.is_empty() {
@@ -145,6 +163,22 @@ impl EpubReader {
             })
         }))
     }
+
+    fn collect_toc_section_labels(epub: &Epub) -> HashMap<String, Vec<SectionLabel>> {
+        let Some(root) = epub.toc().contents() else {
+            return HashMap::new();
+        };
+
+        section_label_map(root.flatten().filter_map(|entry| {
+            let href = entry.href_raw()?;
+            let fragment = href.fragment()?.trim();
+            let resource = href.path().as_str().trim_start_matches('/').to_string();
+            if resource.is_empty() || fragment.is_empty() {
+                return None;
+            }
+            Some((resource, fragment.to_string(), entry.label().to_string()))
+        }))
+    }
 }
 
 impl BookReader for EpubReader {
@@ -168,10 +202,22 @@ impl BookReader for EpubReader {
         }
 
         let html_bytes = self.epub.read_resource_bytes(href)?;
-        let html = String::from_utf8_lossy(&html_bytes).into_owned();
+        let full_html = String::from_utf8_lossy(&html_bytes).into_owned();
+        let next_fragment = self
+            .meta
+            .chapters
+            .get(chapter_idx + 1)
+            .filter(|next| resource_path(&next.resource_id) == href)
+            .and_then(|next| resource_fragment(&next.resource_id));
+        let html = slice_resource_html(
+            &full_html,
+            resource_fragment(&chapter.resource_id),
+            next_fragment,
+        );
+        let section_labels = self.section_labels.get(href).cloned().unwrap_or_default();
         let chapter_html = inline_reference_links(&html, href, |resource| {
             if resource == href {
-                Some(html.clone())
+                Some(full_html.clone())
             } else {
                 self.epub
                     .read_resource_bytes(resource)
@@ -179,6 +225,7 @@ impl BookReader for EpubReader {
                     .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
             }
         });
+        let chapter_html = inject_section_sentinels(&chapter_html, &section_labels);
 
         // 1. Collect all <img> (src, alt) pairs from the raw HTML (left-to-right order).
         let img_list = extract_img_tags(&chapter_html);
@@ -237,7 +284,11 @@ impl BookReader for EpubReader {
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
         {
-            if let Some(idx) = parse_img_sentinel(para) {
+            if let Some(idx) = parse_section_sentinel(para) {
+                if let Some(section) = section_labels.get(idx) {
+                    blocks.push(ContentBlock::SectionMarker(section.title.clone()));
+                }
+            } else if let Some(idx) = parse_img_sentinel(para) {
                 if let Some((src, alt)) = img_list.get(idx) {
                     let resolved = resolve_href(href, src);
                     if let Some(block) = self.load_image_block(&resolved, alt) {
@@ -343,7 +394,15 @@ where
         }
 
         let note_text = if target_resource == current_resource {
-            extract_reference_text(html, &fragment, &marker_text)
+            extract_reference_text(html, &fragment, &marker_text).or_else(|| {
+                resource_cache
+                    .entry(target_resource.clone())
+                    .or_insert_with(|| load_resource_html(target_resource.as_str()))
+                    .as_deref()
+                    .and_then(|target_html| {
+                        extract_reference_text(target_html, &fragment, &marker_text)
+                    })
+            })
         } else {
             resource_cache
                 .entry(target_resource.clone())
@@ -819,7 +878,30 @@ where
     labels
 }
 
-fn build_chapters_from_spine<I>(entries: I, toc_titles: &HashMap<String, String>) -> Vec<Chapter>
+fn section_label_map<I>(entries: I) -> HashMap<String, Vec<SectionLabel>>
+where
+    I: IntoIterator<Item = (String, String, String)>,
+{
+    let mut labels: HashMap<String, Vec<SectionLabel>> = HashMap::new();
+    for (resource, fragment, title) in entries {
+        if resource.is_empty() || fragment.is_empty() {
+            continue;
+        }
+
+        let sections = labels.entry(resource).or_default();
+        if sections.iter().any(|section| section.fragment == fragment) {
+            continue;
+        }
+        sections.push(SectionLabel { fragment, title });
+    }
+    labels
+}
+
+fn build_chapters_from_spine<I>(
+    entries: I,
+    toc_titles: &HashMap<String, String>,
+    section_labels: &HashMap<String, Vec<SectionLabel>>,
+) -> Vec<Chapter>
 where
     I: IntoIterator<Item = (String, bool)>,
 {
@@ -827,6 +909,17 @@ where
 
     for (resource_id, linear) in entries {
         if !linear || resource_id.is_empty() {
+            continue;
+        }
+
+        if let Some(sections) = section_labels.get(resource_id.as_str()) {
+            for section in sections {
+                chapters.push(Chapter {
+                    index: chapters.len(),
+                    title: section.title.clone(),
+                    resource_id: format!("{resource_id}#{}", section.fragment),
+                });
+            }
             continue;
         }
 
@@ -858,10 +951,98 @@ fn resource_path(resource_id: &str) -> &str {
     resource_id.split('#').next().unwrap_or(resource_id)
 }
 
+fn resource_fragment(resource_id: &str) -> Option<&str> {
+    resource_id
+        .split_once('#')
+        .map(|(_, fragment)| fragment)
+        .filter(|fragment| !fragment.is_empty())
+}
+
+fn slice_resource_html(
+    html: &str,
+    start_fragment: Option<&str>,
+    end_fragment: Option<&str>,
+) -> String {
+    let html_lower = html.to_ascii_lowercase();
+    let start = start_fragment
+        .and_then(|fragment| find_section_anchor_start(html, &html_lower, fragment))
+        .unwrap_or(0);
+    let end = end_fragment
+        .and_then(|fragment| find_section_anchor_start(html, &html_lower, fragment))
+        .filter(|end| *end > start)
+        .unwrap_or(html.len());
+    html[start..end].to_string()
+}
+
+fn inject_section_sentinels(html: &str, section_labels: &[SectionLabel]) -> String {
+    if section_labels.is_empty() {
+        return html.to_string();
+    }
+
+    let html_lower = html.to_ascii_lowercase();
+    let mut insertions = Vec::new();
+    for (idx, section) in section_labels.iter().enumerate() {
+        if let Some(position) = find_section_anchor_start(html, &html_lower, &section.fragment)
+            && insertions.iter().all(|(existing, _)| *existing != position)
+        {
+            insertions.push((position, idx));
+        }
+    }
+
+    if insertions.is_empty() {
+        return html.to_string();
+    }
+
+    insertions.sort_by_key(|(position, _)| *position);
+
+    let mut out = String::with_capacity(html.len() + insertions.len() * 32);
+    let mut pos = 0;
+    for (insert_at, idx) in insertions {
+        out.push_str(&html[pos..insert_at]);
+        out.push_str(&format!("</p><p>__INKSEC_{}__</p><p>", idx));
+        pos = insert_at;
+    }
+    out.push_str(&html[pos..]);
+    out
+}
+
+fn find_section_anchor_start(html: &str, html_lower: &str, fragment: &str) -> Option<usize> {
+    let mut pos = 0;
+    while pos < html.len() {
+        let Some(rel_start) = html_lower[pos..].find('<') else {
+            break;
+        };
+        let abs_start = pos + rel_start;
+        let Some(rel_end) = html_lower[abs_start..].find('>') else {
+            break;
+        };
+        let abs_end = abs_start + rel_end + 1;
+        let tag = &html[abs_start..abs_end];
+
+        if ["id", "xml:id", "name"]
+            .iter()
+            .filter_map(|attr| extract_attr(tag, attr))
+            .any(|value| value.eq_ignore_ascii_case(fragment))
+        {
+            return Some(abs_start);
+        }
+
+        pos = abs_end;
+    }
+    None
+}
+
 /// Parse the `__INKIMG_N__` sentinel emitted by the html2text pass.
 fn parse_img_sentinel(para: &str) -> Option<usize> {
     para.trim()
         .strip_prefix("__INKIMG_")
+        .and_then(|s| s.strip_suffix("__"))
+        .and_then(|n| n.parse::<usize>().ok())
+}
+
+fn parse_section_sentinel(para: &str) -> Option<usize> {
+    para.trim()
+        .strip_prefix("__INKSEC_")
         .and_then(|s| s.strip_suffix("__"))
         .and_then(|n| n.parse::<usize>().ok())
 }
@@ -1037,6 +1218,18 @@ mod tests {
                 "第二章 关中：有关空间的命题".to_string(),
             ),
         ]);
+        let section_labels = section_label_map(vec![
+            (
+                "Text/part0006.xhtml".to_string(),
+                "preface".to_string(),
+                "序章".to_string(),
+            ),
+            (
+                "Text/part0006.xhtml".to_string(),
+                "chapter-1".to_string(),
+                "第一章 河南：对峙开始的地方".to_string(),
+            ),
+        ]);
 
         let chapters = build_chapters_from_spine(
             vec![
@@ -1046,19 +1239,52 @@ mod tests {
                 ("Text/part0007.xhtml".to_string(), true),
             ],
             &labels,
+            &section_labels,
         );
 
         let resources: Vec<&str> = chapters.iter().map(|c| c.resource_id.as_str()).collect();
         assert_eq!(
             resources,
             vec![
-                "Text/part0006.xhtml",
+                "Text/part0006.xhtml#preface",
+                "Text/part0006.xhtml#chapter-1",
                 "Text/Section0001.xhtml",
                 "Text/part0007.xhtml",
             ]
         );
-        assert_eq!(chapters[1].title, "第一节 河南节度使与张巡");
-        assert_eq!(chapters[1].index, 1);
+        assert_eq!(chapters[1].title, "第一章 河南：对峙开始的地方");
+        assert_eq!(chapters[2].title, "第一节 河南节度使与张巡");
+        assert_eq!(chapters[2].index, 2);
+    }
+
+    #[test]
+    fn section_label_map_keeps_fragment_order_per_resource() {
+        let labels = section_label_map(vec![
+            (
+                "Text/part0006.xhtml".to_string(),
+                "preface".to_string(),
+                "序章".to_string(),
+            ),
+            (
+                "Text/part0006.xhtml".to_string(),
+                "chapter-1".to_string(),
+                "第一章".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            labels.get("Text/part0006.xhtml"),
+            Some(&vec![
+                SectionLabel {
+                    fragment: "preface".to_string(),
+                    title: "序章".to_string(),
+                },
+                SectionLabel {
+                    fragment: "chapter-1".to_string(),
+                    title: "第一章".to_string(),
+                },
+            ])
+        );
     }
 
     #[test]
@@ -1067,6 +1293,17 @@ mod tests {
             resource_path("Text/Section0001.xhtml#hh2-1"),
             "Text/Section0001.xhtml"
         );
+    }
+
+    #[test]
+    fn slice_resource_html_stops_at_next_fragment_anchor() {
+        let html =
+            r#"<h1 id="preface">序章</h1><p>前言</p><h1 id="chapter-1">第一章</h1><p>正文</p>"#;
+        let sliced = slice_resource_html(html, Some("preface"), Some("chapter-1"));
+
+        assert!(sliced.contains("序章"));
+        assert!(sliced.contains("前言"));
+        assert!(!sliced.contains("第一章"));
     }
 
     // ── parse_img_sentinel ──
@@ -1083,6 +1320,30 @@ mod tests {
         assert_eq!(parse_img_sentinel("Normal paragraph"), None);
         assert_eq!(parse_img_sentinel("__INKIMG_abc__"), None);
         assert_eq!(parse_img_sentinel("__INKIMG__"), None);
+    }
+
+    #[test]
+    fn section_sentinel_survives_html2text_paragraph() {
+        let html = inject_section_sentinels(
+            r#"<html><body><p>序章</p><h2 id="chapter-1">第一章</h2><p>正文</p></body></html>"#,
+            &[SectionLabel {
+                fragment: "chapter-1".to_string(),
+                title: "第一章".to_string(),
+            }],
+        );
+        let text = html2text::from_read(html.as_bytes(), 80).unwrap();
+        let paras: Vec<&str> = text
+            .split("\n\n")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert!(
+            paras
+                .iter()
+                .any(|para| parse_section_sentinel(para) == Some(0)),
+            "section sentinel must survive html2text round-trip: {:?}",
+            paras
+        );
     }
 
     // ── end-to-end: sentinel survives html2text ──
@@ -1133,6 +1394,26 @@ mod tests {
             "正文{INLINE_REF_OPEN}《汉书》卷六十五。{INLINE_REF_CLOSE}继续。"
         )));
         assert!(!rendered.contains(r##"href="#note-1""##));
+    }
+
+    #[test]
+    fn inlines_same_resource_reference_marker_when_target_is_outside_slice() {
+        let full_html = r##"
+            <html><body>
+                <h2 id="chapter-1">第一章</h2>
+                <p>正文<sup><a href="#note-1">[4]</a></sup>继续。</p>
+                <h2 id="chapter-2">第二章</h2>
+                <ol><li id="note-1"><p>《汉书》卷六十五。</p></li></ol>
+            </body></html>
+        "##;
+        let sliced = slice_resource_html(full_html, Some("chapter-1"), Some("chapter-2"));
+        let rendered = inline_reference_links(&sliced, "Text/ch01.xhtml", |path| {
+            (path == "Text/ch01.xhtml").then(|| full_html.to_string())
+        });
+
+        assert!(rendered.contains(&format!(
+            "正文{INLINE_REF_OPEN}《汉书》卷六十五。{INLINE_REF_CLOSE}继续。"
+        )));
     }
 
     #[test]

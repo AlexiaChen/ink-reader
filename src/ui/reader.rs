@@ -32,16 +32,12 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
     let status = if app.showing_cover {
         format!(" {} │ Cover", meta.title)
     } else {
-        let chapter_title = chapters
-            .get(app.current_chapter)
-            .map(|c| c.title.as_str())
-            .unwrap_or("");
         let total_pages = app.pages.len().max(1);
         let current_page = app.current_page + 1;
         format!(
             " {} │ {} │ {}/{} pg  {}/{}  ch",
             meta.title,
-            chapter_title,
+            app.current_location_title(),
             current_page,
             total_pages,
             app.current_chapter + 1,

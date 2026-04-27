@@ -34,8 +34,8 @@ pub trait BookReader {
 ```
 
 `BookMeta` contains `title`, `author: Option<String>`, and `chapters: Vec<Chapter>`.
-`ContentBlock` is an enum: `Paragraph(String)`, `Heading { level, text }`, `Image { data, alt, mime }`, `PageBreak`.
-`Page` has `lines: Vec<String>`, `image: Option<PageImage>`, `first_block: usize`.
+`ContentBlock` is an enum: `Paragraph(String)`, `Heading { level, text }`, `SectionMarker(String)`, `Image { data, alt, mime }`, `PageBreak`.
+`Page` has `lines: Vec<String>`, `image: Option<PageImage>`, `first_block: usize`, and `section_title: Option<String>`.
 
 ### Key Functions in book.rs
 - `pub(crate) fn detect_image_mime(data: &[u8]) -> &'static str` — magic-byte MIME sniff.
@@ -45,12 +45,14 @@ pub trait BookReader {
 - `paginate_blocks(blocks, width, height)` — reflow ContentBlocks into pages.
 
 ### EPUB Inline Image & Reference Extraction (epub.rs)
-`collect_chapters()` must follow the **EPUB spine**, not just top-level ToC entries. The ToC is only a
-title source: flatten it, strip fragments, and let the **first label for each XHTML resource** name the
-spine chapter. This matters for books whose NCX nests multiple section anchors inside one spine document
-(for example `Text/Section0001.xhtml#hh2-1`).
+`collect_chapters()` must follow the **EPUB spine**, but chapter identity is now **fragment-aware**:
+flatten the ToC, group labels by XHTML resource, and expand each spine resource into one or more logical
+chapters in spine order. If a resource carries multiple ToC anchors (for example
+`Text/Section0001.xhtml#hh2-1` / `#hh2-2`), each fragment becomes its own `Chapter.resource_id`
+(`path.xhtml#fragment`) so the status bar, `n` / `p` navigation, ToC, and `x/y ch` counter all track
+the visible logical chapter instead of the coarse resource count.
 
-`chapter_blocks()` now performs two EPUB-specific preprocess passes before `html2text`:
+`chapter_blocks()` now performs three EPUB-specific preprocess passes before `html2text`:
 1. **Inline reference expansion**: footnote/noteref-style anchors such as `#note_2` or `notes.xhtml#n2`
    are resolved to their target block text and wrapped with hidden single-character sentinels in the
    paginated text data. `ui/reader.rs` then renders those sentinels as parenthesized inline notes
@@ -65,6 +67,11 @@ spine chapter. This matters for books whose NCX nests multiple section anchors i
    3. Running html2text on the modified HTML
    4. Splitting result on `\n\n`; swapping `__INKIMG_N__` paragraphs back to `ContentBlock::Image`
    5. Falling back to `[Image: alt]` placeholder paragraphs for failed/unsupported (SVG) images
+3. **Section sentinel injection**: ToC fragment labels within the sliced XHTML section are resolved
+   back onto matching `id` / `xml:id` / `name` anchors and injected as `__INKSEC_N__` paragraphs.
+   After `html2text`, those paragraphs become `ContentBlock::SectionMarker`, letting
+   `paginate_blocks()` stamp `Page.section_title` so the status bar and bookmark titles follow the
+   visible in-resource section instead of staying pinned to the first spine label.
 
 Image pages may also carry **caption lines** in `Page.lines`: `paginate_blocks()` keeps the
 immediate figure/table caption blocks (for example `图1 …` plus following parenthetical source note)
@@ -77,9 +84,12 @@ Helper functions (module-level in epub.rs):
 - `resolve_href(chapter_href, img_src)` — handles `./`, `../` (clamped), fragment, external URLs
 - `resolve_reference_target(chapter_href, link_href)` — resolves `#id` / `path.xhtml#id` reference links
 - `inline_reference_links(html, chapter_href, load_resource_html)` — expands footnote markers inline
+- `slice_resource_html(html, start_fragment, end_fragment)` — trims one XHTML resource down to the current logical chapter span
+- `inject_section_sentinels(html, section_labels)` — injects `__INKSEC_N__` before matching fragment anchors
 - `normalize_path(path)` — strips `.`, resolves `..` without going above root
 - `resource_path(resource_id)` — strips fragment suffix before `read_resource_bytes()`
 - `parse_img_sentinel(para)` — detects `__INKIMG_N__` paragraphs, returns index N
+- `parse_section_sentinel(para)` — detects `__INKSEC_N__` paragraphs, returns index N
 
 Image bytes are stored raw at chapter load; full decode via `image::load_from_memory` is deferred to display time in `refresh_current_image()` to avoid decompression-bomb risk.
 

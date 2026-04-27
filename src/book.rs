@@ -31,6 +31,7 @@ pub enum ContentBlock {
         level: u8,
         text: String,
     },
+    SectionMarker(String),
     Image {
         data: Vec<u8>,
         alt: String,
@@ -67,6 +68,7 @@ pub struct Page {
     /// Logical position: index of the first ContentBlock on this page
     #[allow(dead_code)]
     pub first_block: usize,
+    pub section_title: Option<String>,
 }
 
 /// Cache key for lazy pagination
@@ -103,19 +105,25 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
     let mut cur_lines: Vec<String> = Vec::new();
     let mut cur_first: usize = 0;
     let mut cur_image: Option<PageImage> = None;
+    let mut active_section_title: Option<String> = None;
+    let mut page_section_title: Option<String> = None;
 
     let flush = |pages: &mut Vec<Page>,
                  lines: &mut Vec<String>,
                  first: &mut usize,
                  img: &mut Option<PageImage>,
-                 next_first: usize| {
+                 section_title: &mut Option<String>,
+                 next_first: usize,
+                 next_section_title: Option<String>| {
         if !lines.is_empty() || img.is_some() {
             pages.push(Page {
                 lines: std::mem::take(lines),
                 image: img.take(),
                 first_block: *first,
+                section_title: section_title.clone(),
             });
             *first = next_first;
+            *section_title = next_section_title;
         }
     };
 
@@ -130,7 +138,9 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                             &mut cur_lines,
                             &mut cur_first,
                             &mut cur_image,
+                            &mut page_section_title,
                             block_idx,
+                            active_section_title.clone(),
                         );
                     }
                     cur_lines.push(line);
@@ -152,7 +162,9 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                             &mut cur_lines,
                             &mut cur_first,
                             &mut cur_image,
+                            &mut page_section_title,
                             block_idx,
+                            active_section_title.clone(),
                         );
                     }
                     cur_lines.push(String::new());
@@ -164,7 +176,9 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                             &mut cur_lines,
                             &mut cur_first,
                             &mut cur_image,
+                            &mut page_section_title,
                             block_idx,
+                            active_section_title.clone(),
                         );
                     }
                     cur_lines.push(line);
@@ -175,6 +189,11 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                 }
                 block_idx += 1;
             }
+            ContentBlock::SectionMarker(title) => {
+                active_section_title = Some(title.clone());
+                page_section_title = Some(title.clone());
+                block_idx += 1;
+            }
             ContentBlock::Image { data, alt, mime } => {
                 // Flush current text, then give image its own page.
                 flush(
@@ -182,7 +201,9 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                     &mut cur_lines,
                     &mut cur_first,
                     &mut cur_image,
+                    &mut page_section_title,
                     block_idx,
+                    active_section_title.clone(),
                 );
 
                 let mut caption_lines = Vec::new();
@@ -211,8 +232,10 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                         alt: alt.clone(),
                     }),
                     first_block: block_idx,
+                    section_title: active_section_title.clone(),
                 });
                 cur_first = next_idx;
+                page_section_title = active_section_title.clone();
                 block_idx = next_idx;
             }
             ContentBlock::PageBreak => {
@@ -221,7 +244,9 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
                     &mut cur_lines,
                     &mut cur_first,
                     &mut cur_image,
+                    &mut page_section_title,
                     block_idx + 1,
+                    active_section_title.clone(),
                 );
                 block_idx += 1;
             }
@@ -234,6 +259,7 @@ pub fn paginate_blocks(blocks: &[ContentBlock], width: u16, height: u16) -> Vec<
             lines: cur_lines,
             image: cur_image,
             first_block: cur_first,
+            section_title: page_section_title,
         });
     }
 
@@ -502,5 +528,20 @@ mod tests {
             image_caption_text(&block, false).as_deref(),
             Some("图1 安史之乱前期河南节度使所辖十三州")
         );
+    }
+
+    #[test]
+    fn section_markers_assign_page_titles() {
+        let blocks = vec![
+            ContentBlock::SectionMarker("序章".to_string()),
+            ContentBlock::Paragraph("这一页仍在序章。".to_string()),
+            ContentBlock::PageBreak,
+            ContentBlock::SectionMarker("第一章".to_string()),
+            ContentBlock::Paragraph("这里已经进入第一章。".to_string()),
+        ];
+
+        let pages = paginate_blocks(&blocks, 80, 10);
+        assert_eq!(pages[0].section_title.as_deref(), Some("序章"));
+        assert_eq!(pages[1].section_title.as_deref(), Some("第一章"));
     }
 }

@@ -166,6 +166,23 @@ impl App {
         self.pending_error.take()
     }
 
+    pub(crate) fn current_location_title(&self) -> &str {
+        if let Some(title) = self
+            .pages
+            .get(self.current_page)
+            .and_then(|page| page.section_title.as_deref())
+        {
+            return title;
+        }
+
+        self.reader
+            .meta()
+            .chapters
+            .get(self.current_chapter)
+            .map(|c| c.title.as_str())
+            .unwrap_or("")
+    }
+
     pub(crate) fn bookmarks_for_current_book(&self) -> Vec<&Bookmark> {
         self.bookmarks.for_book(&self.book_path)
     }
@@ -288,9 +305,9 @@ impl App {
                     let target = self
                         .bookmarks_for_current_book()
                         .get(idx)
-                        .map(|bm| (bm.chapter, bm.block_index));
-                    if let Some((chapter, block_index)) = target {
-                        self.jump_to_bookmark(chapter, block_index, size);
+                        .map(|bm| (bm.chapter, bm.block_index, bm.chapter_title.clone()));
+                    if let Some((chapter, block_index, chapter_title)) = target {
+                        self.jump_to_bookmark(chapter, block_index, &chapter_title, size);
                     }
                 }
                 self.mode = Mode::Reading;
@@ -434,13 +451,6 @@ impl App {
     }
 
     fn save_current_bookmark(&mut self) -> Result<()> {
-        let chapter_title = self
-            .reader
-            .meta()
-            .chapters
-            .get(self.current_chapter)
-            .map(|c| c.title.clone())
-            .unwrap_or_default();
         let block_index = self
             .pages
             .get(self.current_page)
@@ -451,14 +461,39 @@ impl App {
             self.book_path.clone(),
             self.current_chapter,
             block_index,
-            chapter_title,
+            self.current_location_title(),
         ));
         self.bookmarks.save()
     }
 
-    fn jump_to_bookmark(&mut self, chapter: usize, block_index: usize, size: Size) {
+    fn resolve_bookmark_chapter(&self, chapter: usize, chapter_title: &str) -> usize {
+        if self
+            .reader
+            .meta()
+            .chapters
+            .get(chapter)
+            .is_some_and(|current| current.title == chapter_title)
+        {
+            return chapter;
+        }
+
+        self.reader
+            .meta()
+            .chapters
+            .iter()
+            .position(|candidate| candidate.title == chapter_title)
+            .unwrap_or_else(|| chapter.min(self.reader.meta().chapters.len().saturating_sub(1)))
+    }
+
+    fn jump_to_bookmark(
+        &mut self,
+        chapter: usize,
+        block_index: usize,
+        chapter_title: &str,
+        size: Size,
+    ) {
         self.showing_cover = false;
-        self.load_chapter(chapter, size);
+        self.load_chapter(self.resolve_bookmark_chapter(chapter, chapter_title), size);
         self.current_page = self
             .pages
             .iter()
@@ -599,5 +634,109 @@ mod tests {
         assert!(app.should_quit);
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].block_index, app.pages[2].first_block);
+    }
+
+    #[test]
+    fn current_location_title_prefers_page_section_title() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(40, 8);
+        app.load_chapter(0, size);
+        app.pages[0].section_title = Some("第一章".to_string());
+
+        assert_eq!(app.current_location_title(), "第一章");
+    }
+
+    #[test]
+    fn bookmark_uses_page_section_title_when_available() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(40, 8);
+        app.load_chapter(0, size);
+        app.pages[0].section_title = Some("第一章".to_string());
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('s')), size);
+
+        let saved = app.bookmarks.for_book(BOOK_PATH);
+        assert_eq!(saved[0].chapter_title, "第一章");
+    }
+
+    #[test]
+    fn bookmark_jump_prefers_saved_title_when_indices_shift() {
+        struct ShiftedReader {
+            meta: BookMeta,
+            chapters: Vec<Vec<ContentBlock>>,
+        }
+
+        impl BookReader for ShiftedReader {
+            fn meta(&self) -> &BookMeta {
+                &self.meta
+            }
+
+            fn chapter_blocks(&self, chapter_idx: usize) -> Result<Vec<ContentBlock>> {
+                Ok(self.chapters[chapter_idx].clone())
+            }
+        }
+
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let store = make_store(&path);
+        let mut app = App {
+            reader: Box::new(ShiftedReader {
+                meta: BookMeta {
+                    title: "Shifted".to_string(),
+                    author: None,
+                    chapters: vec![
+                        Chapter {
+                            index: 0,
+                            title: "序章".to_string(),
+                            resource_id: "book#preface".to_string(),
+                        },
+                        Chapter {
+                            index: 1,
+                            title: "第一章".to_string(),
+                            resource_id: "book#chapter-1".to_string(),
+                        },
+                        Chapter {
+                            index: 2,
+                            title: "第二章".to_string(),
+                            resource_id: "book#chapter-2".to_string(),
+                        },
+                    ],
+                },
+                chapters: vec![
+                    vec![ContentBlock::Paragraph("preface".to_string())],
+                    vec![ContentBlock::Paragraph("chapter one".to_string())],
+                    vec![ContentBlock::Paragraph("chapter two".to_string())],
+                ],
+            }),
+            mode: Mode::BookmarkOverlay,
+            current_chapter: 0,
+            current_page: 0,
+            pages: Vec::new(),
+            pagination_key: None,
+            toc_state: ratatui::widgets::ListState::default(),
+            bookmark_state: ratatui::widgets::ListState::default(),
+            bookmarks: store,
+            picker: None,
+            book_path: BOOK_PATH.to_string(),
+            should_quit: false,
+            pending_error: None,
+            anim: None,
+            showing_cover: false,
+            cover_bytes: None,
+            current_image: None,
+        };
+        let size = Size::new(40, 8);
+        app.bookmarks
+            .add(Bookmark::new(BOOK_PATH, 1, 0, "第二章".to_string()));
+        app.bookmark_state.select(Some(0));
+
+        app.handle_key(KeyEvent::from(KeyCode::Enter), size);
+
+        assert_eq!(app.current_chapter, 2);
+        assert_eq!(app.mode, Mode::Reading);
     }
 }
