@@ -44,18 +44,27 @@ pub trait BookReader {
   is intentional (not `"image/jpeg"`).
 - `paginate_blocks(blocks, width, height)` — reflow ContentBlocks into pages.
 
-### EPUB Inline Image Extraction (epub.rs)
+### EPUB Inline Image & Reference Extraction (epub.rs)
 `collect_chapters()` must follow the **EPUB spine**, not just top-level ToC entries. The ToC is only a
 title source: flatten it, strip fragments, and let the **first label for each XHTML resource** name the
 spine chapter. This matters for books whose NCX nests multiple section anchors inside one spine document
 (for example `Text/Section0001.xhtml#hh2-1`).
 
-`chapter_blocks()` uses a **sentinel injection** pattern to preserve image position through html2text:
-1. Scan raw HTML for `<img>` tags → collect `(src, alt)` pairs (`extract_img_tags`)
-2. Replace each `<img>` with `</p><p>__INKIMG_N__</p><p>` in the HTML string
-3. Run html2text on the modified HTML
-4. Split result on `\n\n`; swap `__INKIMG_N__` paragraphs back to `ContentBlock::Image`
-5. Failed/unsupported (SVG) images emit `[Image: alt]` placeholder paragraph
+`chapter_blocks()` now performs two EPUB-specific preprocess passes before `html2text`:
+1. **Inline reference expansion**: footnote/noteref-style anchors such as `#note_2` or `notes.xhtml#n2`
+   are resolved to their target block text and wrapped with hidden single-character sentinels in the
+   paginated text data. `ui/reader.rs` then renders those sentinels as parenthesized inline notes
+   with cyan + italic styling, so they read differently from body text without leaking raw markers
+   into wrapped lines.
+   This only applies to
+   reference-marker links (short `[4]` / `25`-style markers or `epub:type="noteref"`), so normal
+   intra-book navigation links remain untouched.
+2. **Image sentinel injection**: preserve image position through html2text by:
+   1. Scanning raw HTML for `<img>` tags → collect `(src, alt)` pairs (`extract_img_tags`)
+   2. Replacing each `<img>` with `</p><p>__INKIMG_N__</p><p>` in the HTML string
+   3. Running html2text on the modified HTML
+   4. Splitting result on `\n\n`; swapping `__INKIMG_N__` paragraphs back to `ContentBlock::Image`
+   5. Falling back to `[Image: alt]` placeholder paragraphs for failed/unsupported (SVG) images
 
 Image pages may also carry **caption lines** in `Page.lines`: `paginate_blocks()` keeps the
 immediate figure/table caption blocks (for example `图1 …` plus following parenthetical source note)
@@ -66,6 +75,8 @@ Helper functions (module-level in epub.rs):
 - `extract_img_tags(html)` → `Vec<(src, alt)>` — case-insensitive, handles `data-src` shadowing
 - `extract_attr(tag, attr)` → `Option<String>` — iterates all occurrences to skip false matches
 - `resolve_href(chapter_href, img_src)` — handles `./`, `../` (clamped), fragment, external URLs
+- `resolve_reference_target(chapter_href, link_href)` — resolves `#id` / `path.xhtml#id` reference links
+- `inline_reference_links(html, chapter_href, load_resource_html)` — expands footnote markers inline
 - `normalize_path(path)` — strips `.`, resolves `..` without going above root
 - `resource_path(resource_id)` — strips fragment suffix before `read_resource_bytes()`
 - `parse_img_sentinel(para)` — detects `__INKIMG_N__` paragraphs, returns index N
@@ -110,6 +121,7 @@ cargo test
 - **Bookmarks**: One bookmark per book, stored in `~/.local/share/ink-reader/bookmarks.json`, with manual save on `s` and auto-save on quit
 - **Chapter navigation**: Popup ToC with selectable chapters
 - **Cover image**: Displayed on open for EPUB (manifest cover-image or id/href hint)
+- **Inline references**: EPUB footnote/reference markers such as `[4]` are expanded inline and rendered in a subdued style
 - **Inline illustrations**: EPUB chapter illustrations rendered in-place; SVG/unsupported images shown as `[Image: alt]` placeholder
 - **Images**: Auto-detect terminal protocol; fallback to half-block if unsupported
 - **Formats**: EPUB, TXT

@@ -133,3 +133,19 @@
 - **Evidence**: `src/app.rs:169-171`, `src/app.rs:286-294`, `src/app.rs:436-467`, `src/ui/bookmarks.rs:10-18`
 - **Confidence**: 10/10
 - **Action**: 以后改书签/阅读进度时，一律保存 `chapter + first_block + canonical book_path`，不要保存瞬时页号，也不要在 UI 和存储层各自发明不同的 book key。
+
+### L-016: [gotcha] EPUB 脚注目标常是 `dl/dt/dd`，不是普通段落 (2026-04-27)
+- **Issue**: #62 — 阅读体验增强
+- **Trigger**: epub, footnote, noteref, dl, dd, note_x, reference
+- **Pattern**: 有些 EPUB 的正文脚注链接会从 `<sup><a class="noteref">2</a></sup>` 指向 `<dl id="note_2" class="footnote"><dt>回跳</dt><dd>正文</dd></dl>`。如果只按 `p/li/aside` 去抓目标，会漏掉真实书籍；如果直接吃整个 `dl`，又会把 `dt` 里的回跳箭头一起带进正文。
+- **Evidence**: `src/formats/epub.rs` 中 `preferred_reference_fragment()` 与 `inlines_definition_list_footnotes()`
+- **Confidence**: 9/10
+- **Action**: 以后做 EPUB 引用/脚注解析时，优先读取目标 `dd` 正文；`dl` 只能当容器，不能把整个 `dt/dd` 一起塞回正文。
+
+### L-017: [gotcha] 多字符内联标记会被 textwrap 拆烂，渲染层应改用单字符哨兵 (2026-04-27)
+- **Issue**: #63 — 脚注内联展开的优化
+- **Trigger**: inline reference, textwrap, pagination, wrap, marker, render, sentinel
+- **Pattern**: 把内联引用先编码成 `{{ ... }}` 这种多字符文本标记，再交给 `textwrap` 分页，会被拆成 `{    { ... }}` 之类的碎片，导致渲染层既看见原始标记又无法稳定上样式。根治办法不是继续修花括号解析，而是改成单字符哨兵，再由渲染层把哨兵映射成真实 UI 表现。
+- **Evidence**: `src/book.rs` 的 `INLINE_REF_OPEN/CLOSE`，`src/ui/reader.rs` 的 `stylize_inline_reference_lines()`
+- **Confidence**: 10/10
+- **Action**: 以后做分页后仍需二次渲染的内联语义（脚注、批注、高亮）时，不要把语义编码成多字符可见文本标记；优先用单字符哨兵或结构化数据。

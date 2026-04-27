@@ -1,5 +1,8 @@
 use anyhow::Result;
 
+pub(crate) const INLINE_REF_OPEN: char = '\u{E000}';
+pub(crate) const INLINE_REF_CLOSE: char = '\u{E001}';
+
 /// A single chapter in the book
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

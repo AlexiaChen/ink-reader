@@ -4,8 +4,9 @@
 
 A fast, keyboard-driven TUI e-book reader for Linux/macOS built with Rust and
 [Ratatui](https://github.com/ratatui/ratatui). Open EPUB and TXT files without
-leaving the command line. It now renders book
-cover art and inline illustrations directly inside supported terminals.
+leaving the command line. It now renders book cover art, expands footnotes into
+styled inline references, and shows inline illustrations directly inside
+supported terminals.
 
 ![Rust](https://img.shields.io/badge/rust-2024_edition-orange)
 [![CI](https://github.com/AlexiaChen/ink-reader/actions/workflows/ci.yml/badge.svg)](https://github.com/AlexiaChen/ink-reader/actions/workflows/ci.yml)
@@ -17,16 +18,20 @@ cover art and inline illustrations directly inside supported terminals.
 
 <table>
   <tr>
-    <td align="center" width="50%">
+    <td align="center" width="33.33%">
       <img src="doc/image/cover.png" alt="ink-reader displaying a book cover inside the terminal" />
     </td>
-    <td align="center" width="50%">
+    <td align="center" width="33.33%">
       <img src="doc/image/inline.jpg" alt="ink-reader rendering inline illustrations inside book content" />
+    </td>
+    <td align="center" width="33.33%">
+      <img src="doc/image/footprint.png" alt="ink-reader expanding EPUB footnotes into styled inline references" />
     </td>
   </tr>
   <tr>
     <td align="center"><strong>Cover art</strong><br />Open a book and see its cover before you start reading.</td>
     <td align="center"><strong>Inline illustrations</strong><br />Keep images and nearby captions in the reading flow.</td>
+    <td align="center"><strong>Inline references</strong><br />Expand EPUB footnotes into readable inline notes with distinct styling.</td>
   </tr>
 </table>
 
@@ -47,6 +52,7 @@ falls back so reading still works in text-only environments.
 | **Page-flip animation** | Smooth fan-in/fan-out effect when turning pages |
 | **Paragraph indent** | 4-space first-line indent for comfortable reading |
 | **Cover art** | Displays EPUB covers in-terminal when image rendering is available |
+| **Inline references** | Expands EPUB footnote/reference markers like `[4]` into parenthesized inline citation text with distinct styling |
 | **Inline illustrations** | Renders chapter images in place and keeps nearby captions with the figure |
 | **Persistent state** | One bookmark per book, auto-saved on quit to `~/.local/share/ink-reader/bookmarks.json` |
 | **Responsive layout** | Reflows text automatically on terminal resize |

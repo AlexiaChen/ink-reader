@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
@@ -9,6 +9,7 @@ use ratatui_image::StatefulImage;
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::app::{AnimState, App};
+use crate::book::{INLINE_REF_CLOSE, INLINE_REF_OPEN};
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     // Layout: status (1) | content (fill) | help (1)
@@ -62,12 +63,7 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
         let caption: Vec<Line> = app
             .pages
             .get(app.current_page)
-            .map(|page| {
-                page.lines
-                    .iter()
-                    .map(|line| Line::from(line.as_str()))
-                    .collect()
-            })
+            .map(|page| stylize_inline_reference_lines(page.lines.iter().map(String::as_str)))
             .unwrap_or_default();
 
         let caption_height = (caption.len() as u16).min(area.height.saturating_sub(1));
@@ -108,7 +104,7 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         app.pages
             .get(app.current_page)
-            .map(|page| page.lines.iter().map(|l| Line::from(l.as_str())).collect())
+            .map(|page| stylize_inline_reference_lines(page.lines.iter().map(String::as_str)))
             .unwrap_or_default()
     };
 
@@ -130,7 +126,7 @@ fn build_anim_frame<'a>(anim: &'a AnimState, app: &'a App, height: usize) -> Vec
         .map(|p| p.lines.as_slice())
         .unwrap_or(&[]);
 
-    (0..height)
+    let raw_lines: Vec<&str> = (0..height)
         .map(|i| {
             // Each line has a threshold in [0, 1) at which it switches to new content.
             // Forward: line 0 switches first (fan-down).
@@ -146,9 +142,76 @@ fn build_anim_frame<'a>(anim: &'a AnimState, app: &'a App, height: usize) -> Vec
             } else {
                 anim.old_lines.get(i).map(|s| s.as_str()).unwrap_or("")
             };
-            Line::from(s)
+            s
         })
+        .collect();
+
+    stylize_inline_reference_lines(raw_lines)
+}
+
+fn stylize_inline_reference_lines<'a, I>(lines: I) -> Vec<Line<'a>>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut in_reference = false;
+    lines
+        .into_iter()
+        .map(|line| stylize_inline_reference_line(line, &mut in_reference))
         .collect()
+}
+
+fn stylize_inline_reference_line<'a>(line: &'a str, in_reference: &mut bool) -> Line<'a> {
+    let mut spans = Vec::new();
+    let mut rest = line;
+
+    while !rest.is_empty() {
+        if *in_reference {
+            if let Some(end) = rest.find(INLINE_REF_CLOSE) {
+                let note = rest[..end].trim_end();
+                if !note.is_empty() {
+                    spans.push(Span::styled(note, inline_reference_style()));
+                }
+                spans.push(Span::styled(")", inline_reference_bracket_style()));
+                rest = rest[end + INLINE_REF_CLOSE.len_utf8()..].trim_start();
+                *in_reference = false;
+            } else {
+                let note = rest.trim_end();
+                if !note.is_empty() {
+                    spans.push(Span::styled(note, inline_reference_style()));
+                }
+                rest = "";
+            }
+            continue;
+        }
+
+        let Some(start) = rest.find(INLINE_REF_OPEN) else {
+            spans.push(Span::raw(rest));
+            break;
+        };
+        let (before, after_start) = rest.split_at(start);
+        if !before.is_empty() {
+            spans.push(Span::raw(before));
+        }
+        spans.push(Span::styled("(", inline_reference_bracket_style()));
+        rest = after_start[INLINE_REF_OPEN.len_utf8()..].trim_start();
+        *in_reference = true;
+    }
+
+    if spans.is_empty() {
+        Line::from("")
+    } else {
+        Line::from(spans)
+    }
+}
+
+fn inline_reference_style() -> Style {
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::ITALIC)
+}
+
+fn inline_reference_bracket_style() -> Style {
+    Style::default().fg(Color::DarkGray)
 }
 
 fn render_help(frame: &mut Frame, area: Rect) {
@@ -158,4 +221,49 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Style::default().fg(Color::DarkGray).bg(Color::Black),
     ));
     frame.render_widget(Paragraph::new(line), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_inline_references_with_parentheses() {
+        let raw = format!("正文{INLINE_REF_OPEN}参看《战国歧途》{INLINE_REF_CLOSE}继续");
+        let lines = stylize_inline_reference_lines([raw.as_str()]);
+        let line = &lines[0];
+
+        assert_eq!(line.spans.len(), 5);
+        assert_eq!(line.spans[0].content.as_ref(), "正文");
+        assert_eq!(line.spans[1].content.as_ref(), "(");
+        assert_eq!(line.spans[2].content.as_ref(), "参看《战国歧途》");
+        assert_eq!(line.spans[3].content.as_ref(), ")");
+        assert_eq!(line.spans[4].content.as_ref(), "继续");
+        assert!(line.spans[2].style.add_modifier.contains(Modifier::ITALIC));
+        assert_eq!(line.spans[2].style.fg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn leaves_plain_text_lines_unchanged() {
+        let lines = stylize_inline_reference_lines(["普通正文"]);
+        let line = &lines[0];
+
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content.as_ref(), "普通正文");
+    }
+
+    #[test]
+    fn keeps_reference_state_across_wrapped_lines() {
+        let first = format!("甲{INLINE_REF_OPEN}参看《战国");
+        let second = format!("歧途》{INLINE_REF_CLOSE}乙");
+        let lines = stylize_inline_reference_lines([first.as_str(), second.as_str()]);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].spans[0].content.as_ref(), "甲");
+        assert_eq!(lines[0].spans[1].content.as_ref(), "(");
+        assert_eq!(lines[0].spans[2].content.as_ref(), "参看《战国");
+        assert_eq!(lines[1].spans[0].content.as_ref(), "歧途》");
+        assert_eq!(lines[1].spans[1].content.as_ref(), ")");
+        assert_eq!(lines[1].spans[2].content.as_ref(), "乙");
+    }
 }
