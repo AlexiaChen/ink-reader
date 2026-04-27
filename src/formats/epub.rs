@@ -604,6 +604,7 @@ fn extract_reference_text(html: &str, fragment: &str, marker_text: &str) -> Opti
 
 fn extract_target_element_html(html: &str, fragment: &str) -> Option<String> {
     let html_lower = html.to_ascii_lowercase();
+    let mut open_elements: Vec<(String, usize)> = Vec::new();
     let mut pos = 0;
 
     while pos < html_lower.len() {
@@ -617,22 +618,57 @@ fn extract_target_element_html(html: &str, fragment: &str) -> Option<String> {
         let abs_end = abs_start + rel_end;
         let tag = &html[abs_start..=abs_end];
 
-        if tag.trim_start().starts_with("</") {
-            pos = abs_end + 1;
-            continue;
-        }
-
         let Some(tag_name) = parse_tag_name(tag) else {
             pos = abs_end + 1;
             continue;
         };
+        let trimmed = tag.trim_start();
+
+        if trimmed.starts_with("</") {
+            if let Some(idx) = open_elements
+                .iter()
+                .rposition(|(open_name, _)| open_name == &tag_name)
+            {
+                open_elements.truncate(idx);
+            }
+            pos = abs_end + 1;
+            continue;
+        }
+
         let has_id = extract_attr(tag, "id").as_deref() == Some(fragment)
             || extract_attr(tag, "xml:id").as_deref() == Some(fragment);
 
         if has_id {
-            return is_block_container(&tag_name)
-                .then(|| extract_outer_element_html(html, abs_start, &tag_name))
-                .flatten();
+            if is_block_container(&tag_name) {
+                return extract_outer_element_html(html, abs_start, &tag_name);
+            }
+
+            if let Some((block_tag, block_start)) = open_elements
+                .iter()
+                .rev()
+                .find(|(open_name, _)| is_block_container(open_name))
+            {
+                let block_range = extract_outer_element_range(html, *block_start, block_tag)?;
+                let target_range = if trimmed.ends_with("/>") {
+                    abs_start..abs_end + 1
+                } else {
+                    extract_outer_element_range(html, abs_start, &tag_name)?
+                };
+
+                if target_range.start >= block_range.start && target_range.end <= block_range.end {
+                    return Some(format!(
+                        "{}{}",
+                        &html[block_range.start..target_range.start],
+                        &html[target_range.end..block_range.end]
+                    ));
+                }
+
+                return Some(html[block_range].to_string());
+            }
+        }
+
+        if !trimmed.ends_with("/>") {
+            open_elements.push((tag_name, abs_start));
         }
 
         pos = abs_end + 1;
@@ -642,6 +678,15 @@ fn extract_target_element_html(html: &str, fragment: &str) -> Option<String> {
 }
 
 fn extract_outer_element_html(html: &str, element_start: usize, tag_name: &str) -> Option<String> {
+    let range = extract_outer_element_range(html, element_start, tag_name)?;
+    Some(html[range].to_string())
+}
+
+fn extract_outer_element_range(
+    html: &str,
+    element_start: usize,
+    tag_name: &str,
+) -> Option<Range<usize>> {
     let mut depth = 0usize;
     let mut pos = element_start;
 
@@ -664,7 +709,7 @@ fn extract_outer_element_html(html: &str, element_start: usize, tag_name: &str) 
         if trimmed.starts_with("</") {
             depth = depth.saturating_sub(1);
             if depth == 0 {
-                return Some(html[element_start..=abs_end].to_string());
+                return Some(element_start..abs_end + 1);
             }
         } else if !trimmed.ends_with("/>") {
             depth += 1;
@@ -1467,6 +1512,22 @@ mod tests {
 
         assert!(rendered.contains(&format!(
             "各种吐槽齐国人打仗不行的段子{INLINE_REF_OPEN}参看《战国歧途》齐国军事的部分。{INLINE_REF_CLOSE}。"
+        )));
+    }
+
+    #[test]
+    fn inlines_paragraph_footnotes_with_inline_anchor_target() {
+        let html = r##"
+            <html><body>
+                <p>以及藩镇与州县的关系也成为近来学者关注的另一个重点。<a id="fn12" href="../Text/part0005.xhtml#ft12"><sup>[12]</sup></a></p>
+                <p class="kindle-cn-footnote"><a id="ft12" href="../Text/part0005.xhtml#fn12">[12]</a>这一领域早期的重要研究有：张达志《唐代后期藩镇与州之关系研究》。</p>
+            </body></html>
+        "##;
+
+        let rendered = inline_reference_links(html, "Text/part0005.xhtml", |_| None);
+
+        assert!(rendered.contains(&format!(
+            "以及藩镇与州县的关系也成为近来学者关注的另一个重点。{INLINE_REF_OPEN}这一领域早期的重要研究有：张达志《唐代后期藩镇与州之关系研究》。{INLINE_REF_CLOSE}"
         )));
     }
 

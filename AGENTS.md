@@ -57,7 +57,11 @@ the visible logical chapter instead of the coarse resource count.
    are resolved to their target block text and wrapped with hidden single-character sentinels in the
    paginated text data. `ui/reader.rs` then renders those sentinels as parenthesized inline notes
    with cyan + italic styling, so they read differently from body text without leaking raw markers
-   into wrapped lines.
+   into wrapped lines. Some EPUBs put the target `id` on an inline backlink anchor inside a
+   footnote paragraph (for example `<p class="kindle-cn-footnote"><a id="ft12">[12]</a>正文…</p>`):
+   extraction must fall back to the nearest enclosing block container and strip the inline target
+   anchor itself before `html2text`, otherwise the backlink is re-emitted as markdown-style link
+   definitions in the inline note text.
    This only applies to
    reference-marker links (short `[4]` / `25`-style markers or `epub:type="noteref"`), so normal
    intra-book navigation links remain untouched.
