@@ -135,6 +135,7 @@ cargo test
 - **Bookmarks**: One bookmark per book, stored in `~/.local/share/ink-reader/bookmarks.json`, with manual save on `s` and auto-save on quit
 - **Chapter navigation**: Popup ToC with selectable chapters
 - **Cover image**: Displayed on open for EPUB (manifest cover-image or id/href hint)
+- **Styled headings**: Lines emitted from `ContentBlock::Heading` keep their `#` / `##` markers and are colorized by level in `ui/reader.rs`; wrapped continuation lines inherit the same heading style until the following blank line
 - **Inline references**: EPUB footnote/reference markers such as `[4]` are expanded inline and rendered in a subdued style
 - **Inline illustrations**: EPUB chapter illustrations rendered in-place; SVG/unsupported images shown as `[Image: alt]` placeholder
 - **Images**: Auto-detect terminal protocol; fallback to half-block if unsupported

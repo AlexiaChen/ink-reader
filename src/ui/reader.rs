@@ -150,10 +150,33 @@ where
     I: IntoIterator<Item = &'a str>,
 {
     let mut in_reference = false;
+    let mut active_heading_level = None;
     lines
         .into_iter()
-        .map(|line| stylize_inline_reference_line(line, &mut in_reference))
+        .map(|line| stylize_reader_line(line, &mut in_reference, &mut active_heading_level))
         .collect()
+}
+
+fn stylize_reader_line<'a>(
+    line: &'a str,
+    in_reference: &mut bool,
+    active_heading_level: &mut Option<u8>,
+) -> Line<'a> {
+    if line.trim().is_empty() {
+        *active_heading_level = None;
+        return Line::from("");
+    }
+
+    if let Some(level) = heading_level(line) {
+        *active_heading_level = Some(level);
+        return Line::from(Span::styled(line, heading_style(level)));
+    }
+
+    if let Some(level) = *active_heading_level {
+        return Line::from(Span::styled(line, heading_style(level)));
+    }
+
+    stylize_inline_reference_line(line, in_reference)
 }
 
 fn stylize_inline_reference_line<'a>(line: &'a str, in_reference: &mut bool) -> Line<'a> {
@@ -198,6 +221,29 @@ fn stylize_inline_reference_line<'a>(line: &'a str, in_reference: &mut bool) -> 
     } else {
         Line::from(spans)
     }
+}
+
+fn heading_level(line: &str) -> Option<u8> {
+    let trimmed = line.trim_start_matches(char::is_whitespace);
+    let marker_len = trimmed.bytes().take_while(|b| *b == b'#').count();
+    if !(1..=6).contains(&marker_len) {
+        return None;
+    }
+
+    let rest = trimmed.get(marker_len..)?;
+    let title = rest.strip_prefix(' ')?;
+    (!title.trim().is_empty()).then_some(marker_len as u8)
+}
+
+fn heading_style(level: u8) -> Style {
+    let fg = match level {
+        1 => Color::Yellow,
+        2 => Color::Magenta,
+        3 => Color::Green,
+        _ => Color::White,
+    };
+
+    Style::default().fg(fg).add_modifier(Modifier::BOLD)
 }
 
 fn inline_reference_style() -> Style {
@@ -261,5 +307,98 @@ mod tests {
         assert_eq!(lines[1].spans[0].content.as_ref(), "歧途》");
         assert_eq!(lines[1].spans[1].content.as_ref(), ")");
         assert_eq!(lines[1].spans[2].content.as_ref(), "乙");
+    }
+
+    #[test]
+    fn styles_heading_lines_with_distinct_colors() {
+        let lines = stylize_inline_reference_lines(["# 楔子", "", "## 一", "", "正文"]);
+
+        assert_eq!(lines[0].spans.len(), 1);
+        assert_eq!(lines[0].spans[0].content.as_ref(), "# 楔子");
+        assert_eq!(lines[0].spans[0].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[0].spans[0].style.bg, None);
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        assert!(
+            !lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::ITALIC)
+        );
+
+        assert_eq!(lines[2].spans.len(), 1);
+        assert_eq!(lines[2].spans[0].content.as_ref(), "## 一");
+        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Magenta));
+        assert_eq!(lines[2].spans[0].style.bg, None);
+        assert!(
+            lines[2].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        assert!(
+            !lines[2].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::ITALIC)
+        );
+
+        assert_eq!(lines[4].spans.len(), 1);
+        assert_eq!(lines[4].spans[0].content.as_ref(), "正文");
+        assert_eq!(lines[4].spans[0].style.fg, None);
+    }
+
+    #[test]
+    fn keeps_heading_style_across_wrapped_lines() {
+        let lines = stylize_inline_reference_lines([
+            "# 楔子 出长安记",
+            "（天宝十五载六月十三）",
+            "",
+            "正文",
+        ]);
+
+        assert_eq!(lines[0].spans.len(), 1);
+        assert_eq!(lines[0].spans[0].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[0].spans[0].style.bg, None);
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+
+        assert_eq!(lines[1].spans.len(), 1);
+        assert_eq!(lines[1].spans[0].content.as_ref(), "（天宝十五载六月十三）");
+        assert_eq!(lines[1].spans[0].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[1].spans[0].style.bg, None);
+        assert!(
+            lines[1].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+
+        assert_eq!(lines[3].spans.len(), 1);
+        assert_eq!(lines[3].spans[0].content.as_ref(), "正文");
+        assert_eq!(lines[3].spans[0].style.fg, None);
+    }
+
+    #[test]
+    fn styles_indented_headings_emitted_via_html2text_paragraphs() {
+        let lines = stylize_inline_reference_lines(["    # 楔子", "", "    ## 一"]);
+
+        assert_eq!(lines[0].spans.len(), 1);
+        assert_eq!(lines[0].spans[0].content.as_ref(), "    # 楔子");
+        assert_eq!(lines[0].spans[0].style.fg, Some(Color::Yellow));
+        assert_eq!(lines[0].spans[0].style.bg, None);
+
+        assert_eq!(lines[2].spans.len(), 1);
+        assert_eq!(lines[2].spans[0].content.as_ref(), "    ## 一");
+        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Magenta));
+        assert_eq!(lines[2].spans[0].style.bg, None);
     }
 }

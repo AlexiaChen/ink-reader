@@ -52,6 +52,7 @@ falls back so reading still works in text-only environments.
 | **Page-flip animation** | Smooth fan-in/fan-out effect when turning pages |
 | **Paragraph indent** | 4-space first-line indent for comfortable reading |
 | **Cover art** | Displays EPUB covers in-terminal when image rendering is available |
+| **Styled headings** | Keeps EPUB heading markers like `#` / `##` visible while colorizing heading lines by level for better chapter scannability |
 | **Inline references** | Expands EPUB footnote/reference markers like `[4]` into parenthesized inline citation text with distinct styling |
 | **Inline illustrations** | Renders chapter images in place and keeps nearby captions with the figure |
 | **Persistent state** | One bookmark per book, auto-saved on quit to `~/.local/share/ink-reader/bookmarks.json` |

@@ -149,3 +149,35 @@
 - **Evidence**: `src/book.rs` 的 `INLINE_REF_OPEN/CLOSE`，`src/ui/reader.rs` 的 `stylize_inline_reference_lines()`
 - **Confidence**: 10/10
 - **Action**: 以后做分页后仍需二次渲染的内联语义（脚注、批注、高亮）时，不要把语义编码成多字符可见文本标记；优先用单字符哨兵或结构化数据。
+
+### L-018: [gotcha] EPUB 脚注目标 `id` 可能挂在内联回链锚点上 (2026-04-27)
+- **Issue**: #66 — 脚注部分还有BUG
+- **Trigger**: epub, footnote, inline anchor, kindle-cn-footnote, backlink
+- **Pattern**: 有些 EPUB 不把脚注目标 `id` 挂在 `li/dd/p` 这类块级脚注容器上，而是挂在段落内部的回链 `<a>` 上，例如 `<p class="kindle-cn-footnote"><a id="ft12">[12]</a>正文…</p>`。如果解析器只接受“目标节点本身就是块级容器”，脚注抽取会直接落空。
+- **Evidence**: `src/formats/epub.rs:605-671`，issue #66 sample EPUB `OEBPS/Text/part0005.xhtml`
+- **Confidence**: 9/10
+- **Action**: 当目标 `id` 命中内联标签时，回退到最近的块级祖先容器提取正文。
+
+### L-019: [gotcha] 目标回链锚点不能原样喂给 html2text (2026-04-27)
+- **Issue**: #66 — 脚注部分还有BUG
+- **Trigger**: epub, footnote, html2text, backlink, markdown reference
+- **Pattern**: 如果脚注段落里的回链锚点（如 `<a id="ft12" href="#fn12">[12]</a>`）原样送进 `html2text`，它会被重新编码成 `[[12]][1]` / `[1]: ...` 之类的 markdown 风格链接定义，污染内联脚注文本。
+- **Evidence**: `src/formats/epub.rs:651-667`，issue #66 failing test reproduction
+- **Confidence**: 10/10
+- **Action**: 提取脚注段落时先剥掉命中的内联目标锚点，再做 `html2text`。
+
+### L-020: [gotcha] EPUB 标题可能以“缩进的 markdown heading 文本”进入渲染层 (2026-04-27)
+- **Issue**: #67 — 书籍的章节标题强化
+- **Trigger**: epub, heading, html2text, indent, markdown, title
+- **Pattern**: 当前 EPUB 链路里，`<h1>/<h2>` 可能不会先变成 `ContentBlock::Heading`，而是被 `html2text` 输出成 `# 标题` / `## 标题` 文本，再经过段落分页逻辑加上首行缩进，最终进入 UI 时变成 `    # 标题`。如果标题检测只接受“行首第一个字符就是 #”，样式会完全失效。
+- **Evidence**: `src/ui/reader.rs:226-235`，issue #67 sample EPUB `text/part0003_split_000.html`
+- **Confidence**: 9/10
+- **Action**: 对基于文本前缀的 heading 检测，先忽略行首空白，再识别 `#` 层级。
+
+### L-021: [advice] 标题强化与脚注强化要分开维护状态机 (2026-04-27)
+- **Issue**: #67 — 书籍的章节标题强化
+- **Trigger**: ui render, heading, inline reference, state machine, styling
+- **Pattern**: reader 渲染层同时承担标题着色和 inline reference 着色时，不能把两种语义混在同一个简单规则里；标题块需要跨续行保持层级状态，脚注需要跨续行保持 sentinel 状态，二者必须并行维护，才能既不串色也不断样式。
+- **Evidence**: `src/ui/reader.rs:148-180`
+- **Confidence**: 9/10
+- **Action**: 以后在阅读器里叠加新的文本语义样式时，优先拆成独立状态，而不是往单一匹配函数里继续堆条件。
