@@ -181,3 +181,11 @@
 - **Evidence**: `src/ui/reader.rs:148-180`
 - **Confidence**: 9/10
 - **Action**: 以后在阅读器里叠加新的文本语义样式时，优先拆成独立状态，而不是往单一匹配函数里继续堆条件。
+
+### L-022: [gotcha] EPUB 脚注 marker 不能假设一定是文本 (2026-05-07)
+- **Issue**: #87 — 修复一个新的脚注BUG
+- **Trigger**: epub, footnote, img, noteref, __INKIMG, html2text
+- **Pattern**: 有些 EPUB 会把脚注 marker 做成 `<a><img ...></a>`。如果脚注识别只看文字 marker，这类链接会漏掉，后续图片哨兵再被 `html2text` 输出成 `[__INKIMG_0__][1]` 之类的 markdown 链接文本，直接污染正文。
+- **Evidence**: `src/formats/epub.rs:391-435`, `src/formats/epub.rs:835-874`, `src/formats/epub.rs:1141-1155`
+- **Confidence**: 9/10
+- **Action**: 以后改 EPUB 脚注链路时，同时检查 image-only anchor 是否应视为脚注，以及 `parse_img_sentinel()` 是否仍能兜住 markdown link 包装的图片哨兵。
