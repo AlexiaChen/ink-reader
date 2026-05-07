@@ -388,19 +388,22 @@ where
             pos = anchor_end;
             continue;
         };
-        if !is_reference_anchor(tag, &marker_text, html, abs_start, anchor_end) {
+        let marker_is_image = marker_contains_image(marker_html);
+        let anchor_looks_like_reference =
+            is_reference_anchor(tag, &marker_text, html, abs_start, anchor_end);
+        if !anchor_looks_like_reference && !marker_is_image {
             pos = anchor_end;
             continue;
         }
 
-        let note_text = if target_resource == current_resource {
-            extract_reference_text(html, &fragment, &marker_text).or_else(|| {
+        let note = if target_resource == current_resource {
+            extract_reference_content(html, &fragment, &marker_text).or_else(|| {
                 resource_cache
                     .entry(target_resource.clone())
                     .or_insert_with(|| load_resource_html(target_resource.as_str()))
                     .as_deref()
                     .and_then(|target_html| {
-                        extract_reference_text(target_html, &fragment, &marker_text)
+                        extract_reference_content(target_html, &fragment, &marker_text)
                     })
             })
         } else {
@@ -409,14 +412,27 @@ where
                 .or_insert_with(|| load_resource_html(target_resource.as_str()))
                 .as_deref()
                 .and_then(|target_html| {
-                    extract_reference_text(target_html, &fragment, &marker_text)
+                    extract_reference_content(target_html, &fragment, &marker_text)
                 })
         };
 
-        let Some(note_text) = note_text else {
+        let Some((target_html, note_text)) = note else {
             pos = anchor_end;
             continue;
         };
+        if !anchor_looks_like_reference
+            && !is_image_reference_anchor(
+                marker_html,
+                &fragment,
+                &target_html,
+                html,
+                abs_start,
+                anchor_end,
+            )
+        {
+            pos = anchor_end;
+            continue;
+        }
 
         replacements.push(ReferenceReplacement {
             range: expand_reference_wrapper(html, abs_start, anchor_end),
@@ -595,11 +611,15 @@ fn resolve_reference_target(chapter_href: &str, link_href: &str) -> Option<(Stri
     }
 }
 
-fn extract_reference_text(html: &str, fragment: &str, marker_text: &str) -> Option<String> {
+fn extract_reference_content(
+    html: &str,
+    fragment: &str,
+    marker_text: &str,
+) -> Option<(String, String)> {
     let target_html = extract_target_element_html(html, fragment)?;
     let preferred_html = preferred_reference_fragment(&target_html);
     let text = clean_reference_text(&html_fragment_to_text(preferred_html), marker_text);
-    (!text.is_empty()).then_some(text)
+    (!text.is_empty()).then_some((target_html, text))
 }
 
 fn extract_target_element_html(html: &str, fragment: &str) -> Option<String> {
@@ -810,6 +830,47 @@ fn is_reference_anchor(tag: &str, marker_text: &str, html: &str, start: usize, e
     }
 
     is_reference_marker(marker_text) || expand_reference_wrapper(html, start, end).start < start
+}
+
+fn marker_contains_image(html: &str) -> bool {
+    !extract_img_tags(html).is_empty()
+}
+
+fn is_image_reference_anchor(
+    marker_html: &str,
+    fragment: &str,
+    target_html: &str,
+    html: &str,
+    start: usize,
+    end: usize,
+) -> bool {
+    marker_contains_image(marker_html)
+        && (expand_reference_wrapper(html, start, end).start < start
+            || reference_fragment_hint(fragment)
+            || reference_target_hint(target_html))
+}
+
+fn reference_fragment_hint(fragment: &str) -> bool {
+    let fragment = fragment.trim().to_ascii_lowercase();
+    fragment.contains("note")
+        || fragment.contains("foot")
+        || fragment.contains("endnote")
+        || fragment.starts_with("fn")
+        || fragment.starts_with("ft")
+}
+
+fn reference_target_hint(target_html: &str) -> bool {
+    let target_html_lower = target_html.to_ascii_lowercase();
+    target_html_lower.contains("footnote")
+        || target_html_lower.contains("endnote")
+        || target_html_lower.contains("noteref")
+        || target_html_lower.contains("doc-footnote")
+        || target_html_lower.contains("doc-endnote")
+        || target_html_lower.contains("kindle-cn-footnote")
+        || matches!(
+            parse_tag_name(target_html).as_deref(),
+            Some("aside" | "dd" | "li")
+        )
 }
 
 fn is_reference_marker(text: &str) -> bool {
@@ -1079,8 +1140,17 @@ fn find_section_anchor_start(html: &str, html_lower: &str, fragment: &str) -> Op
 
 /// Parse the `__INKIMG_N__` sentinel emitted by the html2text pass.
 fn parse_img_sentinel(para: &str) -> Option<usize> {
-    para.trim()
-        .strip_prefix("__INKIMG_")
+    parse_plain_img_sentinel(para.trim()).or_else(|| {
+        let trimmed = para.trim();
+        let (marker, suffix) = trimmed.strip_prefix('[')?.split_once(']')?;
+        let suffix = suffix.trim_start();
+        matches!(suffix.chars().next(), Some('[' | '(')).then_some(())?;
+        parse_plain_img_sentinel(marker)
+    })
+}
+
+fn parse_plain_img_sentinel(para: &str) -> Option<usize> {
+    para.strip_prefix("__INKIMG_")
         .and_then(|s| s.strip_suffix("__"))
         .and_then(|n| n.parse::<usize>().ok())
 }
@@ -1358,6 +1428,8 @@ mod tests {
         assert_eq!(parse_img_sentinel("__INKIMG_0__"), Some(0));
         assert_eq!(parse_img_sentinel("__INKIMG_42__"), Some(42));
         assert_eq!(parse_img_sentinel("  __INKIMG_7__  "), Some(7));
+        assert_eq!(parse_img_sentinel("[__INKIMG_3__][1]"), Some(3));
+        assert_eq!(parse_img_sentinel("[__INKIMG_5__](#note-5)"), Some(5));
     }
 
     #[test]
@@ -1529,6 +1601,38 @@ mod tests {
         assert!(rendered.contains(&format!(
             "以及藩镇与州县的关系也成为近来学者关注的另一个重点。{INLINE_REF_OPEN}这一领域早期的重要研究有：张达志《唐代后期藩镇与州之关系研究》。{INLINE_REF_CLOSE}"
         )));
+    }
+
+    #[test]
+    fn inlines_image_only_reference_markers() {
+        let html = r##"
+            <html><body>
+                <p>正文<a href="#note-1"><img src="../Images/note.png" alt="" /></a>继续。</p>
+                <ol><li id="note-1"><p>这是图片脚注。</p></li></ol>
+            </body></html>
+        "##;
+
+        let rendered = inline_reference_links(html, "Text/ch01.xhtml", |_| None);
+
+        assert!(rendered.contains(&format!(
+            "正文{INLINE_REF_OPEN}这是图片脚注。{INLINE_REF_CLOSE}继续。"
+        )));
+        assert!(!rendered.contains(r##"href="#note-1""##));
+    }
+
+    #[test]
+    fn leaves_non_reference_image_links_untouched() {
+        let html = r##"
+            <html><body>
+                <p><a href="#sec-2"><img src="../Images/nav.png" alt="" /></a></p>
+                <h2 id="sec-2">第二章</h2>
+            </body></html>
+        "##;
+
+        let rendered = inline_reference_links(html, "Text/ch01.xhtml", |_| None);
+
+        assert!(rendered.contains(r##"href="#sec-2""##));
+        assert!(!rendered.contains(&format!("{INLINE_REF_OPEN}第二章{INLINE_REF_CLOSE}")));
     }
 
     #[test]

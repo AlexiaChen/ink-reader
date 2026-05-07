@@ -61,10 +61,10 @@ the visible logical chapter instead of the coarse resource count.
    footnote paragraph (for example `<p class="kindle-cn-footnote"><a id="ft12">[12]</a>正文…</p>`):
    extraction must fall back to the nearest enclosing block container and strip the inline target
    anchor itself before `html2text`, otherwise the backlink is re-emitted as markdown-style link
-   definitions in the inline note text.
-   This only applies to
-   reference-marker links (short `[4]` / `25`-style markers or `epub:type="noteref"`), so normal
-   intra-book navigation links remain untouched.
+   definitions in the inline note text. Image-only note markers (`<a><img ...></a>`) also count as
+   references when the target fragment / target block looks footnote-like, which avoids leaking
+   html2text output such as `[__INKIMG_0__][1]` for image-backed footnote markers while keeping
+   ordinary image navigation links untouched.
 2. **Image sentinel injection**: preserve image position through html2text by:
    1. Scanning raw HTML for `<img>` tags → collect `(src, alt)` pairs (`extract_img_tags`)
    2. Replacing each `<img>` with `</p><p>__INKIMG_N__</p><p>` in the HTML string
@@ -92,7 +92,7 @@ Helper functions (module-level in epub.rs):
 - `inject_section_sentinels(html, section_labels)` — injects `__INKSEC_N__` before matching fragment anchors
 - `normalize_path(path)` — strips `.`, resolves `..` without going above root
 - `resource_path(resource_id)` — strips fragment suffix before `read_resource_bytes()`
-- `parse_img_sentinel(para)` — detects `__INKIMG_N__` paragraphs, returns index N
+- `parse_img_sentinel(para)` — detects `__INKIMG_N__` paragraphs and markdown link-wrapped forms like `[__INKIMG_N__][1]`, returns index N
 - `parse_section_sentinel(para)` — detects `__INKSEC_N__` paragraphs, returns index N
 
 Image bytes are stored raw at chapter load; full decode via `image::load_from_memory` is deferred to display time in `refresh_current_image()` to avoid decompression-bomb risk.
@@ -136,7 +136,7 @@ cargo test
 - **Chapter navigation**: Popup ToC with selectable chapters
 - **Cover image**: Displayed on open for EPUB (manifest cover-image or id/href hint)
 - **Styled headings**: Lines emitted from `ContentBlock::Heading` keep their `#` / `##` markers and are colorized by level in `ui/reader.rs`; wrapped continuation lines inherit the same heading style until the following blank line
-- **Inline references**: EPUB footnote/reference markers such as `[4]` are expanded inline and rendered in a subdued style
+- **Inline references**: EPUB footnote/reference markers such as `[4]` or image-backed note icons are expanded inline and rendered in a subdued style
 - **Inline illustrations**: EPUB chapter illustrations rendered in-place; SVG/unsupported images shown as `[Image: alt]` placeholder
 - **Images**: Auto-detect terminal protocol; fallback to half-block if unsupported
 - **Formats**: EPUB, TXT
