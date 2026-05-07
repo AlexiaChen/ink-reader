@@ -778,7 +778,7 @@ fn preferred_reference_fragment(html: &str) -> &str {
 }
 
 fn clean_reference_text(raw: &str, marker_text: &str) -> String {
-    let mut text = collapse_whitespace(raw);
+    let mut text = collapse_whitespace(&strip_markdown_reference_definitions(raw));
 
     while let Some(stripped) = text.strip_suffix("↩︎").or_else(|| text.strip_suffix("↩")) {
         text = stripped.trim_end().to_string();
@@ -807,11 +807,82 @@ fn clean_reference_text(raw: &str, marker_text: &str) -> String {
         }
     }
 
-    text
+    strip_leading_reference_artifacts(&text)
 }
 
 fn strip_reference_brackets(text: &str) -> &str {
     text.trim_matches(|c: char| matches!(c, '[' | ']' | '(' | ')' | '{' | '}' | '^'))
+}
+
+fn strip_markdown_reference_definitions(text: &str) -> String {
+    let mut kept = Vec::new();
+    let mut skipping_definition = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if is_markdown_reference_definition_start(trimmed) {
+            skipping_definition = true;
+            continue;
+        }
+
+        if skipping_definition {
+            if trimmed.is_empty() {
+                skipping_definition = false;
+            } else if line.starts_with([' ', '\t']) || trimmed.starts_with('#') {
+                continue;
+            } else {
+                skipping_definition = false;
+            }
+        }
+
+        kept.push(line);
+    }
+
+    kept.join("\n")
+}
+
+fn is_markdown_reference_definition_start(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('[') else {
+        return false;
+    };
+    let Some((label, suffix)) = rest.split_once(']') else {
+        return false;
+    };
+    !label.is_empty() && suffix.trim_start().starts_with(':')
+}
+
+fn strip_leading_reference_artifacts(text: &str) -> String {
+    let mut remaining = text.trim_start();
+
+    while let Some(len) = leading_reference_artifact_len(remaining) {
+        remaining = remaining[len..].trim_start();
+    }
+
+    remaining.to_string()
+}
+
+fn leading_reference_artifact_len(text: &str) -> Option<usize> {
+    let end = text.find(char::is_whitespace).unwrap_or(text.len());
+    let token = &text[..end];
+    if token.is_empty() {
+        return None;
+    }
+
+    if is_reference_marker(token) {
+        return Some(end);
+    }
+
+    let visible = markdown_reference_visible_text(token)?;
+    (is_reference_marker(visible) || is_reference_marker(strip_reference_brackets(visible)))
+        .then_some(end)
+}
+
+fn markdown_reference_visible_text(token: &str) -> Option<&str> {
+    let rest = token.strip_prefix('[')?;
+    let close = rest.find(']')?;
+    let visible = &rest[..close];
+    let suffix = rest[close + 1..].trim_start();
+    matches!(suffix.chars().next(), Some('[' | '(')).then_some(visible)
 }
 
 fn collapse_whitespace(text: &str) -> String {
@@ -1601,6 +1672,28 @@ mod tests {
         assert!(rendered.contains(&format!(
             "以及藩镇与州县的关系也成为近来学者关注的另一个重点。{INLINE_REF_OPEN}这一领域早期的重要研究有：张达志《唐代后期藩镇与州之关系研究》。{INLINE_REF_CLOSE}"
         )));
+    }
+
+    #[test]
+    fn strips_markdown_reference_artifacts_from_inline_notes() {
+        let html = r##"
+            <html><body>
+                <p>封常清击降大勃律<a class="duokan-footnote" href="#fo4" id="foref4"><img alt="" src="../images/note.png"/></a>。</p>
+                <ol>
+                    <li class="duokan-footnote-item" id="fo4">
+                        <p class="footnote-content"><a href="#foref4">[4]</a> 参见《资治通鉴》卷216“天宝十二载十月”条。</p>
+                    </li>
+                </ol>
+            </body></html>
+        "##;
+
+        let rendered = inline_reference_links(html, "Text/part0005.xhtml", |_| None);
+
+        assert!(rendered.contains(&format!(
+            "封常清击降大勃律{INLINE_REF_OPEN}参见《资治通鉴》卷216“天宝十二载十月”条。{INLINE_REF_CLOSE}。"
+        )));
+        assert!(!rendered.contains("[[4]][1]"));
+        assert!(!rendered.contains("[1]:"));
     }
 
     #[test]

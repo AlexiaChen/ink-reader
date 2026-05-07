@@ -189,3 +189,11 @@
 - **Evidence**: `src/formats/epub.rs:391-435`, `src/formats/epub.rs:835-874`, `src/formats/epub.rs:1141-1155`
 - **Confidence**: 9/10
 - **Action**: 以后改 EPUB 脚注链路时，同时检查 image-only anchor 是否应视为脚注，以及 `parse_img_sentinel()` 是否仍能兜住 markdown link 包装的图片哨兵。
+
+### L-023: [gotcha] image-only 脚注正文里的回链锚点也会污染 inline note (2026-05-07)
+- **Issue**: #88 — 修复新脚注BUG
+- **Trigger**: epub, inline reference, footnote, html2text, duokan, backlink
+- **Pattern**: 即使正文里的脚注 marker 已经识别成 image-only reference，只要提取出的脚注正文仍以回链锚点开头，`html2text` 还是会生成 `[[4]][1]`、`[1]: #foref4` 这样的 markdown 引用残留，污染 inline note 的开头和结尾。
+- **Evidence**: `src/formats/epub.rs:780-886`, `src/formats/epub.rs:1677-1697`
+- **Confidence**: 10/10
+- **Action**: 清洗 inline note 时先删掉 markdown reference definitions，再去掉前导的 reference marker artifacts，而不是只依赖原始 marker 文本做前缀裁剪。
