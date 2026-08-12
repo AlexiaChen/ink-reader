@@ -22,6 +22,17 @@ pub struct BookMeta {
     pub chapters: Vec<Chapter>,
 }
 
+/// A navigation entry shown in the table-of-contents overlay.
+///
+/// Most formats use `BookMeta::chapters` directly. Formats such as PDF can
+/// provide a smaller, document-authored outline whose entries jump to a page
+/// represented by a chapter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TocEntry {
+    pub title: String,
+    pub chapter: usize,
+}
+
 /// A structured block of content within a chapter
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -44,6 +55,11 @@ pub enum ContentBlock {
 pub trait BookReader: Send {
     fn meta(&self) -> &BookMeta;
     fn chapter_blocks(&self, chapter_idx: usize) -> Result<Vec<ContentBlock>>;
+    /// Return a format-authored table of contents, if one exists.
+    /// The default keeps the existing chapter-list behaviour unchanged.
+    fn toc_entries(&self) -> Option<&[TocEntry]> {
+        None
+    }
     /// Return the book cover image as `(bytes, mime_type)`, if available.
     fn cover_image(&self) -> Option<(&[u8], &str)> {
         None

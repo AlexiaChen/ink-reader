@@ -2,7 +2,7 @@
 name = "ink-reader"
 version = "0.1.0"
 edition = "2024"
-description = "Ink on the terminal — read epubs and txt in the terminal"
+description = "Ink on the terminal — read EPUB, PDF, and TXT books in the terminal"
 
 [[bin]]
 name = "ink-reader"
@@ -32,6 +32,7 @@ dirs = "5"
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
+pdf_oxide = { version = "0.3.77", features = ["rendering"] }
 
 [dev-dependencies]
 tempfile = "3"

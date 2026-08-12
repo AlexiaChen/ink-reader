@@ -1,7 +1,7 @@
 # Ink Reader — Project Knowledge Base
 
 ## Overview
-Terminal TUI e-book reader written in Rust. Supports EPUB and TXT formats.
+Terminal TUI e-book reader written in Rust. Supports EPUB, PDF, and TXT formats.
 Runs on Linux terminal with image display via Kitty/Sixel protocol.
 
 ## Architecture
@@ -14,7 +14,8 @@ src/
 ├── book.rs           # Unified Book/Page representation
 ├── formats/
 │   ├── mod.rs        # BookReader trait definition
-│   ├── epub.rs       # EPUB parser (uses `epub` crate)
+│   ├── epub.rs       # EPUB parser (uses `rbook` crate)
+│   ├── pdf.rs        # PDF parser/extractor (uses `pdf_oxide` crate)
 │   └── txt.rs        # Plain text reader
 ├── ui/
 │   ├── mod.rs
@@ -29,6 +30,7 @@ src/
 pub trait BookReader {
     fn meta(&self) -> &BookMeta;
     fn chapter_blocks(&self, chapter_idx: usize) -> Result<Vec<ContentBlock>>;
+    fn toc_entries(&self) -> Option<&[TocEntry]> { None } // optional authored outline
     fn cover_image(&self) -> Option<(&[u8], &str)> { None }  // default: no cover
 }
 ```
@@ -43,6 +45,26 @@ pub trait BookReader {
   **All format readers must use this** — never write a local copy. `"image/unknown"` fallback
   is intentional (not `"image/jpeg"`).
 - `paginate_blocks(blocks, width, height)` — reflow ContentBlocks into pages.
+
+### PDF Extraction (pdf.rs)
+PDF support uses exactly `pdf_oxide 0.3.77` with its `rendering` feature. Each source PDF page is
+one logical `Chapter`, so existing page/chapter navigation, bookmarks, resize reflow, and status
+counters work without a separate PDF UI mode. `PdfDocument::to_markdown()` supplies structure-tree-
+first reading order, heading detection, form values, and tagged/spatial table extraction; the adapter
+converts headings to `ContentBlock::Heading` and retains GFM tables as multi-line paragraphs.
+
+`PdfDocument::get_outline()` is flattened into optional `TocEntry` values that jump to the target
+PDF page; named destinations are resolved with `resolve_named_destination()`. If no authored outline
+exists, the ToC overlay falls back to the per-page chapter list. PDF page labels are used for fallback
+page titles when present.
+
+Embedded PDF images are extracted from page content streams (including nested Form XObjects),
+normalized with `PdfImage::to_png_bytes()`, and emitted as `ContentBlock::Image`. Full decode remains
+deferred to `App::refresh_current_image()`. The first PDF page is rendered at 96 DPI with the
+pure-Rust renderer and exposed through `cover_image()`; rendering failure is non-fatal.
+
+PDF metadata prefers XMP Dublin Core title/creators, then falls back to the traditional trailer
+`/Info` Title/Author strings and finally the filename.
 
 ### EPUB Inline Image & Reference Extraction (epub.rs)
 `collect_chapters()` must follow the **EPUB spine**, but chapter identity is now **fragment-aware**:
@@ -105,6 +127,7 @@ Image bytes are stored raw at chapter load; full decode via `image::load_from_me
 | crossterm | 0.29 | Terminal backend |
 | ratatui-image | 10.x | Terminal image display (Kitty/Sixel/half-block) — use `Picker::halfblocks()` as fallback, NOT `Picker::new()` |
 | rbook | 0.7 | EPUB 2+3 parsing |
+| pdf_oxide | 0.3.77 + rendering | PDF metadata, outline, text/table/image extraction, page rendering |
 | html2text | 0.17 | HTML→plain text for EPUB content |
 | textwrap | 0.16 | Word-wrap text to terminal width |
 | serde + serde_json | 1.x | Bookmark serialization |
@@ -119,6 +142,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo build
 cargo run -- /path/to/book.epub
+cargo run -- /path/to/book.pdf
 cargo test
 ```
 
@@ -134,12 +158,13 @@ cargo test
 - **Pagination**: Text is reflowed to terminal dimensions on resize
 - **Bookmarks**: One bookmark per book, stored in `~/.local/share/ink-reader/bookmarks.json`, with manual save on `s` and auto-save on quit
 - **Chapter navigation**: Popup ToC with selectable chapters
-- **Cover image**: Displayed on open for EPUB (manifest cover-image or id/href hint)
+- **Cover image**: Displayed on open for EPUB (manifest cover-image or id/href hint) and PDF (rendered first page)
 - **Styled headings**: Lines emitted from `ContentBlock::Heading` keep their `#` / `##` markers and are colorized by level in `ui/reader.rs`; wrapped continuation lines inherit the same heading style until the following blank line
 - **Inline references**: EPUB footnote/reference markers such as `[4]` or image-backed note icons are expanded inline and rendered in a subdued style
 - **Inline illustrations**: EPUB chapter illustrations rendered in-place; SVG/unsupported images shown as `[Image: alt]` placeholder
 - **Images**: Auto-detect terminal protocol; fallback to half-block if unsupported
-- **Formats**: EPUB, TXT
+- **PDF extraction**: Reflowed text, styled headings, structured tables, embedded images, XMP/Info metadata, native outline, page labels
+- **Formats**: EPUB, PDF, TXT
 
 ## Code Conventions
 - Use `anyhow::Result` for all error handling in binary code

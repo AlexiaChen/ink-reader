@@ -11,13 +11,19 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let popup = centered_rect(60, 80, area);
     frame.render_widget(Clear, popup);
 
-    let items: Vec<ListItem> = app
-        .reader
-        .meta()
-        .chapters
-        .iter()
-        .map(|c| ListItem::new(c.title.as_str()))
-        .collect();
+    let items: Vec<ListItem> = if let Some(entries) = app.reader.toc_entries() {
+        entries
+            .iter()
+            .map(|entry| ListItem::new(entry.title.as_str()))
+            .collect()
+    } else {
+        app.reader
+            .meta()
+            .chapters
+            .iter()
+            .map(|c| ListItem::new(c.title.as_str()))
+            .collect()
+    };
 
     let list = List::new(items)
         .block(

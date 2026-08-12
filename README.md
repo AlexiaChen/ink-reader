@@ -3,7 +3,7 @@
 > Ink on the terminal — read ebooks in your terminal.
 
 A fast, keyboard-driven TUI e-book reader for Linux/macOS built with Rust and
-[Ratatui](https://github.com/ratatui/ratatui). Open EPUB and TXT files without
+[Ratatui](https://github.com/ratatui/ratatui). Open EPUB, PDF, and TXT files without
 leaving the command line. It now renders book cover art, expands footnotes into
 styled inline references, and shows inline illustrations directly inside
 supported terminals.
@@ -44,17 +44,18 @@ falls back so reading still works in text-only environments.
 
 | Feature | Details |
 |---------|---------|
-| **Format support** | EPUB, TXT |
-| **Table of Contents** | Overlay (`t`) to jump to any chapter instantly |
+| **Format support** | EPUB, PDF, TXT |
+| **Table of Contents** | Overlay (`t`) for EPUB chapters and native PDF outlines; PDFs without an outline fall back to page navigation |
 | **Bookmarks** | Save/overwrite (`s`), browse (`b`), delete (`d`), jump to the saved bookmark |
 | **Page navigation** | `↓` / `Space` next page · `↑` prev page |
 | **Chapter navigation** | `n` next chapter · `p` prev chapter |
 | **Page-flip animation** | Smooth fan-in/fan-out effect when turning pages |
 | **Paragraph indent** | 4-space first-line indent for comfortable reading |
-| **Cover art** | Displays EPUB covers in-terminal when image rendering is available |
-| **Styled headings** | Keeps EPUB heading markers like `#` / `##` visible while colorizing heading lines by level for better chapter scannability |
+| **Cover art** | Displays EPUB covers and a rendered PDF first page in-terminal when image rendering is available |
+| **Styled headings** | Keeps extracted EPUB/PDF heading markers like `#` / `##` visible while colorizing heading lines by level |
 | **Inline references** | Expands EPUB footnote/reference markers like `[4]` into parenthesized inline citation text with distinct styling |
-| **Inline illustrations** | Renders chapter images in place and keeps nearby captions with the figure |
+| **Inline illustrations** | Renders EPUB illustrations in place and displays images extracted from PDF page content streams and nested Form XObjects |
+| **PDF tables** | Uses PDF Oxide's tagged/spatial table detection and keeps extracted tables as readable terminal text |
 | **Persistent state** | One bookmark per book, auto-saved on quit to `~/.local/share/ink-reader/bookmarks.json` |
 | **Responsive layout** | Reflows text automatically on terminal resize |
 
@@ -171,6 +172,7 @@ src/
 ├── book.rs          # Core types, pagination, text-wrapping
 ├── formats/
 │   ├── epub.rs      # EPUB reader (rbook)
+│   ├── pdf.rs       # PDF text/table/image/outline reader (pdf_oxide)
 │   └── txt.rs       # Plain-text reader
 ├── storage.rs       # Bookmark persistence (JSON via serde)
 └── ui/
@@ -188,6 +190,7 @@ src/
 | `ratatui-image` | Inline image rendering |
 | `rbook` | EPUB parsing |
 | `html2text` | HTML-to-plain-text for EPUB content |
+| `pdf_oxide` | PDF metadata, outline, text/table/image extraction, and first-page rendering |
 | `textwrap` | Unicode-aware text wrapping with indent support |
 | `clap` | CLI argument parsing |
 | `serde` / `serde_json` | Bookmark serialization |

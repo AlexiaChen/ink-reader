@@ -18,7 +18,7 @@ use storage::book_id;
 #[derive(Parser)]
 #[command(name = "ink-reader", about = "Terminal TUI e-book reader", version)]
 struct Args {
-    /// Path to the e-book file (epub, txt)
+    /// Path to the e-book file (epub, pdf, txt)
     file: PathBuf,
 }
 

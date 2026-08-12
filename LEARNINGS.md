@@ -197,3 +197,19 @@
 - **Evidence**: `src/formats/epub.rs:780-886`, `src/formats/epub.rs:1677-1697`
 - **Confidence**: 10/10
 - **Action**: 清洗 inline note 时先删掉 markdown reference definitions，再去掉前导的 reference marker artifacts，而不是只依赖原始 marker 文本做前缀裁剪。
+
+### L-024: [gotcha] PDF 内嵌图片数据不一定是可直接显示的文件字节 (2026-08-12)
+- **Issue**: 增加 PDF 支持
+- **Trigger**: pdf_oxide, PdfImage, ImageData, JPEG, raw pixels, terminal image
+- **Pattern**: `pdf_oxide::PdfImage` 可能持有原始 JPEG，也可能是 RGB/Gray/CMYK/Indexed 等解码像素；把 `data()` 直接交给 `image::load_from_memory` 会让 raw pixel 图片显示失败。应先用库自身的 `to_png_bytes()` 完成色彩空间转换和编码，再复用现有 `ContentBlock::Image` 链路。
+- **Evidence**: `src/formats/pdf.rs` `page_blocks()`；`pdf_oxide-0.3.77/src/extractors/images.rs` `PdfImage::to_png_bytes()`
+- **Confidence**: 10/10
+- **Action**: PDF 图片统一走 `extract_images()` → `to_png_bytes()`；单张图片转换失败只跳过该图片，不影响该页文本阅读。
+
+### L-025: [architecture] PDF 源页与终端重分页必须分层 (2026-08-12)
+- **Issue**: 增加 PDF 支持
+- **Trigger**: pdf, page, chapter, outline, bookmark, resize
+- **Pattern**: PDF 有固定源页，而终端页面会随宽高重排。把每个 PDF 源页映射为一个逻辑 `Chapter`，再沿用 `paginate_blocks()` 生成终端页，可以让 `n/p`、书签、resize 和状态计数保持稳定；原生 outline 则通过可选 `TocEntry { title, chapter }` 指向对应源页，不应把 outline 序号误当源页号。
+- **Evidence**: `src/formats/pdf.rs`，`src/book.rs` `BookReader::toc_entries()`，`src/app.rs` `handle_key_toc()`
+- **Confidence**: 10/10
+- **Action**: 后续 PDF 功能继续区分 source page、outline entry 和 terminal page 三种位置语义。

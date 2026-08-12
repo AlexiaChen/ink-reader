@@ -228,7 +228,8 @@ impl App {
             // Toggle ToC
             KeyCode::Char('t') => {
                 self.mode = Mode::TocOverlay;
-                self.toc_state.select(Some(self.current_chapter));
+                self.toc_state
+                    .select(Some(self.toc_selection_for_chapter(self.current_chapter)));
             }
             // Toggle bookmarks
             KeyCode::Char('b') => {
@@ -246,7 +247,11 @@ impl App {
     }
 
     fn handle_key_toc(&mut self, key: KeyEvent, size: Size) {
-        let chapter_count = self.reader.meta().chapters.len();
+        let chapter_count = self
+            .reader
+            .toc_entries()
+            .map(|entries| entries.len())
+            .unwrap_or_else(|| self.reader.meta().chapters.len());
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('t') => {
                 self.mode = Mode::Reading;
@@ -269,12 +274,32 @@ impl App {
             }
             KeyCode::Enter => {
                 if let Some(idx) = self.toc_state.selected() {
-                    self.load_chapter(idx, size);
+                    let chapter = self
+                        .reader
+                        .toc_entries()
+                        .and_then(|entries| entries.get(idx))
+                        .map(|entry| entry.chapter)
+                        .unwrap_or(idx);
+                    self.load_chapter(chapter, size);
                 }
                 self.mode = Mode::Reading;
             }
             _ => {}
         }
+    }
+
+    fn toc_selection_for_chapter(&self, chapter: usize) -> usize {
+        let Some(entries) = self.reader.toc_entries() else {
+            return chapter;
+        };
+
+        entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.chapter <= chapter)
+            .max_by_key(|(_, entry)| entry.chapter)
+            .map(|(idx, _)| idx)
+            .unwrap_or(0)
     }
 
     fn handle_key_bookmarks(&mut self, key: KeyEvent, size: Size) {
@@ -512,13 +537,14 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::*;
-    use crate::book::{BookMeta, Chapter};
+    use crate::book::{BookMeta, Chapter, TocEntry};
 
     const BOOK_PATH: &str = "/books/test.epub";
 
     struct DummyReader {
         meta: BookMeta,
         chapters: Vec<Vec<ContentBlock>>,
+        toc: Option<Vec<TocEntry>>,
     }
 
     impl DummyReader {
@@ -540,6 +566,7 @@ mod tests {
                     ContentBlock::PageBreak,
                     ContentBlock::Paragraph("Page two".to_string()),
                 ]],
+                toc: None,
             }
         }
     }
@@ -551,6 +578,10 @@ mod tests {
 
         fn chapter_blocks(&self, chapter_idx: usize) -> Result<Vec<ContentBlock>> {
             Ok(self.chapters[chapter_idx].clone())
+        }
+
+        fn toc_entries(&self) -> Option<&[TocEntry]> {
+            self.toc.as_deref()
         }
     }
 
@@ -597,6 +628,45 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Enter), size);
 
         assert_eq!(app.current_page, 1);
+        assert_eq!(app.mode, Mode::Reading);
+    }
+
+    #[test]
+    fn authored_toc_selection_jumps_to_mapped_chapter() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let mut reader = DummyReader::new();
+        reader.meta.chapters = (0..3)
+            .map(|index| Chapter {
+                index,
+                title: format!("Page {}", index + 1),
+                resource_id: format!("page-{index}"),
+            })
+            .collect();
+        reader.chapters = (0..3)
+            .map(|index| vec![ContentBlock::Paragraph(format!("Page {index}"))])
+            .collect();
+        reader.toc = Some(vec![
+            TocEntry {
+                title: "Start".to_string(),
+                chapter: 0,
+            },
+            TocEntry {
+                title: "Later".to_string(),
+                chapter: 2,
+            },
+        ]);
+        app.reader = Box::new(reader);
+
+        let size = Size::new(40, 8);
+        app.load_chapter(1, size);
+        app.handle_key(KeyEvent::from(KeyCode::Char('t')), size);
+        assert_eq!(app.toc_state.selected(), Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Down), size);
+        app.handle_key(KeyEvent::from(KeyCode::Enter), size);
+
+        assert_eq!(app.current_chapter, 2);
         assert_eq!(app.mode, Mode::Reading);
     }
 
