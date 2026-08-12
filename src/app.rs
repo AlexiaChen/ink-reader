@@ -45,6 +45,10 @@ pub struct App {
     pub cover_bytes: Option<Vec<u8>>,
     /// Active image protocol for the current cover or in-chapter image page.
     pub current_image: Option<StatefulProtocol>,
+    /// Terminal graphics protocols are not fully represented by ratatui's cell
+    /// buffer. Set this whenever an image or overlay transition needs the
+    /// backend and its diff buffer to be cleared together.
+    needs_terminal_clear: bool,
 }
 
 impl App {
@@ -76,6 +80,7 @@ impl App {
             showing_cover,
             cover_bytes,
             current_image: None,
+            needs_terminal_clear: false,
         };
 
         app.toc_state.select(Some(0));
@@ -124,7 +129,10 @@ impl App {
     /// the book cover (when `showing_cover`) or an image embedded in the
     /// current page.  Clears `current_image` if there is nothing to show.
     pub fn refresh_current_image(&mut self) {
-        self.current_image = None;
+        let had_image = self.current_image.take().is_some();
+        if had_image {
+            self.needs_terminal_clear = true;
+        }
 
         let bytes: Vec<u8> = if self.showing_cover {
             match &self.cover_bytes {
@@ -146,6 +154,13 @@ impl App {
         {
             self.current_image = Some(picker.new_resize_protocol(dyn_img));
         }
+
+        // Entering an image page also needs a full clear. Sixel/iTerm2 mark the
+        // image area as skipped cells, so the previous text frame can otherwise
+        // remain underneath the newly emitted terminal graphic.
+        if self.current_image.is_some() {
+            self.needs_terminal_clear = true;
+        }
     }
 
     /// Called on terminal resize.
@@ -164,6 +179,27 @@ impl App {
 
     pub fn take_pending_error(&mut self) -> Option<anyhow::Error> {
         self.pending_error.take()
+    }
+
+    /// Consume a request to clear the physical terminal before the next draw.
+    /// This is required for Sixel/iTerm2 graphics, which may survive ordinary
+    /// ratatui cell-buffer diffs and otherwise cover text or popup widgets.
+    pub fn take_terminal_clear_request(&mut self) -> bool {
+        std::mem::take(&mut self.needs_terminal_clear)
+    }
+
+    fn open_overlay(&mut self, mode: Mode) {
+        self.mode = mode;
+        self.anim = None;
+        self.needs_terminal_clear = true;
+    }
+
+    fn close_overlay(&mut self) {
+        self.mode = Mode::Reading;
+        // Rebuild the protocol so Kitty retransmits if the terminal clear also
+        // discarded its cached image, while Sixel/iTerm2 get fresh image data.
+        self.refresh_current_image();
+        self.needs_terminal_clear = true;
     }
 
     pub(crate) fn current_location_title(&self) -> &str {
@@ -227,13 +263,13 @@ impl App {
             }
             // Toggle ToC
             KeyCode::Char('t') => {
-                self.mode = Mode::TocOverlay;
+                self.open_overlay(Mode::TocOverlay);
                 self.toc_state
                     .select(Some(self.toc_selection_for_chapter(self.current_chapter)));
             }
             // Toggle bookmarks
             KeyCode::Char('b') => {
-                self.mode = Mode::BookmarkOverlay;
+                self.open_overlay(Mode::BookmarkOverlay);
                 self.bookmark_state.select(Some(0));
             }
             // Save bookmark at current position
@@ -254,7 +290,7 @@ impl App {
             .unwrap_or_else(|| self.reader.meta().chapters.len());
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('t') => {
-                self.mode = Mode::Reading;
+                self.close_overlay();
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let next = self
@@ -282,7 +318,7 @@ impl App {
                         .unwrap_or(idx);
                     self.load_chapter(chapter, size);
                 }
-                self.mode = Mode::Reading;
+                self.close_overlay();
             }
             _ => {}
         }
@@ -307,7 +343,7 @@ impl App {
 
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('b') => {
-                self.mode = Mode::Reading;
+                self.close_overlay();
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let next = self
@@ -335,7 +371,7 @@ impl App {
                         self.jump_to_bookmark(chapter, block_index, &chapter_title, size);
                     }
                 }
-                self.mode = Mode::Reading;
+                self.close_overlay();
             }
             KeyCode::Char('d') => {
                 // Delete selected bookmark
@@ -530,14 +566,17 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
     use std::path::PathBuf;
 
     use crossterm::event::{KeyCode, KeyEvent};
+    use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
     use ratatui::layout::Size;
+    use ratatui_image::picker::Picker;
     use tempfile::NamedTempFile;
 
     use super::*;
-    use crate::book::{BookMeta, Chapter, TocEntry};
+    use crate::book::{BookMeta, Chapter, PageImage, TocEntry};
 
     const BOOK_PATH: &str = "/books/test.epub";
 
@@ -608,7 +647,106 @@ mod tests {
             showing_cover: false,
             cover_bytes: None,
             current_image: None,
+            needs_terminal_clear: false,
         }
+    }
+
+    fn install_test_image(app: &mut App) {
+        let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(2, 2, Rgba([20, 40, 60, 255])));
+        let mut data = Cursor::new(Vec::new());
+        image.write_to(&mut data, ImageFormat::Png).unwrap();
+        app.pages = vec![Page {
+            image: Some(PageImage {
+                data: data.into_inner(),
+                mime: "image/png".to_string(),
+                alt: "test image".to_string(),
+            }),
+            ..Page::default()
+        }];
+        app.picker = Some(Picker::halfblocks());
+        app.refresh_current_image();
+        assert!(app.current_image.is_some());
+        assert!(app.take_terminal_clear_request());
+    }
+
+    #[test]
+    fn toc_overlay_clears_terminal_graphics_and_restores_image() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(40, 8);
+        install_test_image(&mut app);
+
+        assert!(!app.take_terminal_clear_request());
+        app.handle_key(KeyEvent::from(KeyCode::Char('t')), size);
+
+        assert_eq!(app.mode, Mode::TocOverlay);
+        assert!(app.take_terminal_clear_request());
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('t')), size);
+
+        assert_eq!(app.mode, Mode::Reading);
+        assert!(app.current_image.is_some());
+        assert!(app.take_terminal_clear_request());
+        assert!(!app.take_terminal_clear_request());
+    }
+
+    #[test]
+    fn bookmark_overlay_clears_terminal_graphics_and_restores_image() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(40, 8);
+        install_test_image(&mut app);
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('b')), size);
+        assert_eq!(app.mode, Mode::BookmarkOverlay);
+        assert!(app.take_terminal_clear_request());
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('b')), size);
+        assert_eq!(app.mode, Mode::Reading);
+        assert!(app.current_image.is_some());
+        assert!(app.take_terminal_clear_request());
+    }
+
+    #[test]
+    fn replacing_an_image_with_text_requests_terminal_clear() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        install_test_image(&mut app);
+
+        app.pages[0].image = None;
+        app.refresh_current_image();
+
+        assert!(app.current_image.is_none());
+        assert!(app.take_terminal_clear_request());
+    }
+
+    #[test]
+    fn entering_an_image_page_from_text_requests_terminal_clear() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        install_test_image(&mut app);
+
+        app.current_image = None;
+        app.pages.insert(
+            0,
+            Page {
+                lines: vec!["text before image".to_string()],
+                ..Page::default()
+            },
+        );
+        app.current_page = 0;
+
+        app.next_page(Size::new(40, 8));
+
+        assert_eq!(app.current_page, 1);
+        assert!(app.pages[1].image.is_some());
+        assert!(app.current_image.is_some());
+        assert!(app.anim.is_none());
+        assert!(app.take_terminal_clear_request());
     }
 
     #[test]
@@ -798,6 +936,7 @@ mod tests {
             showing_cover: false,
             cover_bytes: None,
             current_image: None,
+            needs_terminal_clear: false,
         };
         let size = Size::new(40, 8);
         app.bookmarks

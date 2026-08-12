@@ -213,3 +213,11 @@
 - **Evidence**: `src/formats/pdf.rs`，`src/book.rs` `BookReader::toc_entries()`，`src/app.rs` `handle_key_toc()`
 - **Confidence**: 10/10
 - **Action**: 后续 PDF 功能继续区分 source page、outline entry 和 terminal page 三种位置语义。
+
+### L-026: [gotcha] ratatui 的 `Clear` 不能可靠遮住终端图形协议 (2026-08-12)
+- **Issue**: PDF 支持后 EPUB 图片浮在正文和目录/书签弹窗之上
+- **Trigger**: ratatui-image, Sixel, iTerm2, Kitty, overlay, terminal clear, buffer diff
+- **Pattern**: `StatefulImage` 会把转义序列写入 ratatui 单元格，但终端最终显示的图形不一定遵守普通字符覆盖语义。尤其 Sixel 实现明确允许终端把图形一直画在其他 UI 上；弹窗里的 `widgets::Clear` 只重置 ratatui 缓冲单元，页面切换时丢弃 `StatefulProtocol` 也不会让旧图形自动进入下一次 diff。因此图片页切到正文会残留旧图，目录/书签也可能被图形挡住。
+- **Evidence**: `src/ui/reader.rs` 仅在 `Mode::Reading` 绘图；`src/app.rs` 的 image/overlay clear request；`src/main.rs` 在下一帧前调用 `Terminal::clear()`
+- **Confidence**: 10/10
+- **Action**: 任何 popup 打开/关闭，以及 text→image、image→text、image→image 的双向切换，都必须同时处理物理终端图形与 ratatui diff 缓冲；进入图片页前也要全屏清理，否则图片区域的 skipped cells 会保留上一页文字。弹窗期间不要在底层帧重复渲染图片，关闭后重建图片协议。

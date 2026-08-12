@@ -8,7 +8,7 @@ use ratatui::{
 use ratatui_image::StatefulImage;
 use ratatui_image::protocol::StatefulProtocol;
 
-use crate::app::{AnimState, App};
+use crate::app::{AnimState, App, Mode};
 use crate::book::{INLINE_REF_CLOSE, INLINE_REF_OPEN};
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -54,8 +54,12 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Render an image page (cover or embedded in-chapter image).
-    if let Some(ref mut proto) = app.current_image {
+    // Terminal graphics can sit outside ratatui's character buffer. Never draw
+    // them behind a popup: `Clear` only resets cells and cannot reliably cover
+    // Sixel/iTerm2 images on every terminal implementation.
+    if app.mode == Mode::Reading
+        && let Some(ref mut proto) = app.current_image
+    {
         let caption: Vec<Line> = app
             .pages
             .get(app.current_page)

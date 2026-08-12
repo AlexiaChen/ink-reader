@@ -58,6 +58,9 @@ fn run(
 
     loop {
         app.tick_anim();
+        if app.take_terminal_clear_request() {
+            terminal.clear()?;
+        }
         terminal.draw(|frame| ui::render(frame, &mut app))?;
 
         let poll_ms: u64 = if app.anim.is_some() { 15 } else { 200 };

@@ -119,6 +119,14 @@ Helper functions (module-level in epub.rs):
 
 Image bytes are stored raw at chapter load; full decode via `image::load_from_memory` is deferred to display time in `refresh_current_image()` to avoid decompression-bomb risk.
 
+### Terminal Image & Overlay Invariant
+Kitty/Sixel/iTerm2 graphics are not ordinary ratatui character cells. `ui/reader.rs` must not render
+`StatefulImage` while a ToC or bookmark overlay is active. Entering or leaving an overlay, and every
+transition between text and images or between two images, must request `Terminal::clear()` through
+`App::take_terminal_clear_request()` before the next draw. Closing an overlay rebuilds the current
+image protocol so the reading page can be restored after that full clear. `Clear` in the popup widgets
+is still required for their character-cell background, but is not sufficient to erase terminal graphics.
+
 ## Key Dependencies
 
 | Crate | Version | Purpose |
@@ -177,3 +185,4 @@ cargo test
 - Never panic on malformed ebook data — return errors gracefully
 - Terminal dimensions must be re-queried before paginating (handle resize events)
 - Image display is always optional — reader must work in text-only mode
+- Never render a terminal image behind a popup; synchronize terminal graphics and ratatui's diff buffer with a full clear on image/overlay transitions
