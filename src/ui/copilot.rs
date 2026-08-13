@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::copilot::CopilotPhase;
+use crate::math_render::{AnswerLineKind, render_markdown};
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let privacy = if app.copilot.config.is_local() {
@@ -130,9 +131,24 @@ fn render_answer(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         app.copilot.answer.as_str()
     };
-    let answer = Paragraph::new(text)
-        .wrap(Wrap { trim: false })
-        .scroll((app.copilot.scroll, 0));
+    let lines = render_markdown(text, area.width as usize)
+        .into_iter()
+        .map(|line| {
+            let style = match line.kind {
+                AnswerLineKind::Text => Style::default(),
+                AnswerLineKind::Heading => Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+                AnswerLineKind::Code => Style::default().fg(Color::LightYellow),
+                AnswerLineKind::Math => Style::default()
+                    .fg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
+                AnswerLineKind::Dim => Style::default().fg(Color::DarkGray),
+            };
+            Line::from(Span::styled(line.text, style))
+        })
+        .collect::<Vec<_>>();
+    let answer = Paragraph::new(lines).scroll((app.copilot.scroll, 0));
     frame.render_widget(answer, area);
 }
 

@@ -13,6 +13,7 @@ src/
 ├── app.rs            # Application state machine (ratatui event loop)
 ├── book.rs           # Unified Book/Page representation
 ├── copilot.rs        # Rig reading agent + background streaming state
+├── math_render.rs    # Markdown math events + terminal-native 2D LaTeX layout
 ├── formats/
 │   ├── mod.rs        # BookReader trait definition
 │   ├── epub.rs       # EPUB parser (uses `rbook` crate)
@@ -152,6 +153,16 @@ Unlike a popup, a side-by-side Copilot panel may render a terminal image only in
 pane; transitions still require a full terminal clear. ToC/bookmark popups must continue suppressing
 all terminal image rendering.
 
+Copilot answer math uses `pulldown-cmark` `ENABLE_MATH` events and `term-maths`, not terminal images.
+Completed `$...$` / `$$...$$` regions become Unicode 2D formula lines at their answer position;
+unfinished streaming delimiters remain source text. Inline single-row formulae stay in prose, while
+multi-row formulae become centered blocks. Code spans must not be parsed as math. Formula parsing is
+untrusted model output: preserve the length/nesting limits, panic boundary, bounded cache, and visible
+LaTeX fallback for over-wide/unsafe input. Never silently discard part of a formula.
+`AGENT_SYSTEM_PROMPT` is the producer side of this protocol: it must keep requiring only `$...$` and
+`$$...$$`, reject alternate math delimiters/code fences, and steer models to the supported TeX subset.
+Any renderer syntax change must update the prompt contract and its regression test in the same slice.
+
 ## Key Dependencies
 
 | Crate | Version | Purpose |
@@ -165,6 +176,7 @@ all terminal image rendering.
 | tokio + futures-util | 1.x / 0.3 | Background Agent runtime and response stream |
 | html2text | 0.17 | HTML→plain text for EPUB content |
 | textwrap | 0.16 | Word-wrap text to terminal width |
+| pulldown-cmark + term-maths | 0.13 / 1.0 | Markdown math events and 2D Unicode LaTeX rendering |
 | serde + serde_json | 1.x | Bookmark serialization |
 | dirs | 5.x | XDG paths (~/.local/share) |
 | anyhow | 1.x | Application-level error handling |

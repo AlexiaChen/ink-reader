@@ -237,3 +237,11 @@
 - **Evidence**: `src/ui/mod.rs` `copilot_layout()` / `reader_size()`；`src/app.rs` `reflow_current_chapter()`；`src/ui/reader.rs` 分栏图片渲染开关
 - **Confidence**: 10/10
 - **Action**: 后续增加可拖拽宽度、左侧翻页或多面板时，布局状态必须先进入分页 key；终端图片只允许画在与面板不重叠的 reader Rect 内，几何变化仍需 full clear。
+
+### L-029: [architecture] 流式公式优先使用同坐标系的 Unicode 排版 (2026-08-13)
+- **Issue**: Reading Copilot 回复中的 `$...$` LaTeX 在终端原样泄漏
+- **Trigger**: latex, markdown, term-maths, pulldown-cmark, streaming, ratatui-image
+- **Pattern**: 把每个公式转成图片虽然精细，但滚动回答会在每个 token 后重排位置，Kitty/Sixel/iTerm2 图片又不属于 ratatui 字符缓冲；多图缩放、移动和擦除容易阻塞 UI 或覆盖邻近面板。使用 Markdown `InlineMath` / `DisplayMath` 事件识别完整 delimiter，再把 TeX 排成二维 Unicode 网格，公式与文本共享滚动坐标，未闭合流式公式也能自然保留原文。
+- **Evidence**: `src/math_render.rs` `render_markdown()` / `push_formula()`；`src/ui/copilot.rs` `render_answer()`；`src/copilot.rs` Agent system prompt
+- **Confidence**: 9/10
+- **Action**: 公式输入始终视为不可信：限制长度和嵌套、捕获 parser panic、限制缓存；宽公式必须附带可见源码回退。只有未来能提供后台 resize、精确 image placement 和跨协议清屏测试时，才增加可选 SVG/PNG 后端。

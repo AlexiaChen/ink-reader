@@ -58,7 +58,7 @@ falls back so reading still works in text-only environments.
 | **PDF tables** | Uses PDF Oxide's tagged/spatial table detection and keeps extracted tables as readable terminal text |
 | **Persistent state** | One bookmark per book, auto-saved on quit to `~/.local/share/ink-reader/bookmarks.json` |
 | **Responsive layout** | Reflows text automatically on terminal resize |
-| **Reading Copilot** | A private-by-default Rig agent in a streaming right panel, keeping the source page visible while it explains, translates, summarizes, analyzes, or answers questions |
+| **Reading Copilot** | A private-by-default Rig agent in a streaming right panel, with terminal-native LaTeX math rendering alongside the visible source page |
 
 ---
 
@@ -172,6 +172,13 @@ the visible reading page is supplied to the agent; opening the menu does not
 send anything. Remote endpoints are opt-in because excerpts leave the machine.
 See [Reading Copilot design and setup](doc/reading-copilot.md).
 
+Completed `$...$` and `$$...$$` TeX regions in Copilot answers are parsed as
+Markdown math and rendered as two-dimensional Unicode notation. Fractions,
+roots, limits, integrals, and matrices therefore remain aligned while scrolling
+and copying like ordinary terminal text. An unfinished formula stays as source
+text during streaming; over-wide or unsafe formulas retain a visible LaTeX
+fallback instead of being silently truncated.
+
 ---
 
 ## Build & Development
@@ -215,6 +222,7 @@ src/
 ├── app.rs           # Application state machine (reading / ToC / bookmarks modes)
 ├── book.rs          # Core types, pagination, text-wrapping
 ├── copilot.rs       # Rig reading agent, provider config, and background stream state
+├── math_render.rs   # Markdown math parsing and 2D Unicode LaTeX rendering
 ├── formats/
 │   ├── epub.rs      # EPUB reader (rbook)
 │   ├── pdf.rs       # PDF text/table/image/outline reader (pdf_oxide)
@@ -238,6 +246,7 @@ src/
 | `html2text` | HTML-to-plain-text for EPUB content |
 | `pdf_oxide` | PDF metadata, outline, text/table/image extraction, and first-page rendering |
 | `textwrap` | Unicode-aware text wrapping with indent support |
+| `pulldown-cmark` / `term-maths` | Markdown math detection and terminal-native 2D LaTeX rendering |
 | `clap` | CLI argument parsing |
 | `serde` / `serde_json` | Bookmark serialization |
 | `rig-core` | Agent abstraction, Ollama provider, streaming, and future tools/RAG |

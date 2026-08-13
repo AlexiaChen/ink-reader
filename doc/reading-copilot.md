@@ -26,6 +26,35 @@ the approximate chapter position.
 answer: the UI shows a `Reasoning…` state and renders only the model's final
 response. The endpoint and `LOCAL`/`REMOTE` privacy state remain visible.
 
+### Mathematical notation
+
+Copilot asks models to emit inline TeX as `$...$` and display TeX as `$$...$$`.
+This is an explicit Agent system-prompt contract: alternatives such as
+`\(...\)`, `\[...\]`, UnicodeMath, MathML, and formula code fences are forbidden,
+and the model is asked to balance every brace and delimiter. The prompt favors
+the renderer's well-covered common subset (`\frac`, `\sqrt`, scripts, sums,
+products, integrals, limits, scalable delimiters, and common matrix environments).
+`pulldown-cmark` recognizes only completed Markdown math events, so a partial
+formula remains visible source text while tokens are still streaming. Once its
+closing delimiter arrives, `term-maths` lays it out as a two-dimensional Unicode
+grid in the same position in the answer. Single-row expressions remain inline;
+fractions, roots, matrices, sums, and integrals expand into centered multi-row
+blocks and participate in normal `j`/`k` scrolling.
+
+The renderer is pure Rust and needs no TeX distribution, Node, browser, image
+protocol, or network. Rendered formulae are cached, capped at 256 entries, and
+untrusted model output is limited by source length and nesting depth. A formula
+wider than the panel is visibly clipped only for preview and is immediately
+followed by its wrapped LaTeX source, so mathematical information is not lost.
+Code spans such as `` `$x$` `` stay code rather than being interpreted as math.
+
+The first implementation deliberately does not render formulae as terminal
+images. Multiple dynamic Kitty/Sixel/iTerm2 images inside a scrolling answer
+would require per-formula background resize work plus protocol-specific erase
+and relocation on every streamed reflow. Unicode math is copyable, scrolls in
+the same coordinate system as prose, works over SSH and half-block terminals,
+and cannot cover the source pane or a popup.
+
 The context is the visible reflowed page, book title, and current chapter or
 section title. This is intentionally smaller than a whole chapter: it reduces
 latency, keeps the claim boundary obvious, and caps local memory use. The agent

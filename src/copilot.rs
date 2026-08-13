@@ -14,6 +14,7 @@ use rig_core::{
 
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:11434";
 const DEFAULT_MODEL: &str = "qwen3.5:4b";
+const AGENT_SYSTEM_PROMPT: &str = "You are Ink Reader's reading agent. Help the reader understand the supplied excerpt. Never pretend to have seen the rest of the book. Distinguish claims supported by the excerpt from outside knowledge. Preserve mathematical notation and citation meaning. Return useful Markdown without a preamble.\n\nMATH OUTPUT CONTRACT: When mathematical notation is useful, emit valid TeX using ONLY $...$ for inline math and $$...$$ for display math. Never use \\(...\\), \\[...\\], UnicodeMath, MathML, or a code span/fence for a formula. Keep explanatory prose outside math delimiters. Prefer common TeX supported by the terminal renderer: \\frac, \\sqrt, ^, _, \\sum, \\prod, \\int, \\lim, \\left, \\right, and pmatrix/bmatrix/vmatrix environments. Always balance braces and delimiters. Do not use a bare dollar sign for currency; write the currency code instead.";
 
 #[derive(Debug, Clone)]
 pub struct CopilotConfig {
@@ -395,12 +396,11 @@ async fn stream_agent(
             .map(|exchange| format!("\n\nConversation context:\n---\n{exchange}\n---"))
             .unwrap_or_default()
     );
-    let system = "You are Ink Reader's reading agent. Help the reader understand the supplied excerpt. Never pretend to have seen the rest of the book. Distinguish claims supported by the excerpt from outside knowledge. Preserve mathematical notation and citation meaning. Return useful Markdown without a preamble.";
     let agent = client
         .agent(config.model_for(task))
         .name("ink-reading-agent")
         .description("A page-scoped agent for close reading, translation, and reasoning")
-        .preamble(system)
+        .preamble(AGENT_SYSTEM_PROMPT)
         .context(&page_context)
         .temperature(if matches!(task, CopilotTask::Translate) {
             0.1
@@ -526,6 +526,21 @@ mod tests {
     }
 
     #[test]
+    fn system_prompt_defines_the_terminal_math_contract() {
+        for required in [
+            "ONLY $...$",
+            "$$...$$",
+            "Never use \\(...\\)",
+            "code span/fence",
+            "\\frac",
+            "pmatrix/bmatrix/vmatrix",
+            "balance braces and delimiters",
+        ] {
+            assert!(AGENT_SYSTEM_PROMPT.contains(required), "missing {required}");
+        }
+    }
+
+    #[test]
     fn malformed_endpoint_is_reported_without_panicking() {
         let error = validate_endpoint("not a URL").unwrap_err();
         assert!(error.contains("http:// or https://"));
@@ -639,6 +654,8 @@ mod tests {
         assert!(request.contains("\"stream\":true"));
         assert!(request.contains("\"think\":false"));
         assert!(request.contains("\"num_ctx\":8192"));
+        assert!(request.contains("ONLY $...$"));
+        assert!(request.contains("pmatrix/bmatrix/vmatrix"));
 
         let events: Vec<StreamEvent> = event_receiver.try_iter().collect();
         assert!(matches!(events.first(), Some(StreamEvent::Delta(text)) if text == "你好"));

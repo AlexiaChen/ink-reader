@@ -10,6 +10,7 @@ mod app;
 mod book;
 mod copilot;
 mod formats;
+mod math_render;
 mod storage;
 mod ui;
 
