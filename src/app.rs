@@ -7,6 +7,8 @@ use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::book::{BookReader, ContentBlock, Page, PaginationKey, paginate_blocks};
+use crate::book::{INLINE_REF_CLOSE, INLINE_REF_OPEN};
+use crate::copilot::{CopilotConfig, CopilotContext, CopilotPhase, CopilotState, CopilotTask};
 use crate::storage::{Bookmark, BookmarkStore};
 
 /// State for a running page-flip animation.
@@ -22,6 +24,7 @@ pub enum Mode {
     Reading,
     TocOverlay,
     BookmarkOverlay,
+    CopilotPanel,
 }
 
 pub struct App {
@@ -34,6 +37,7 @@ pub struct App {
     pub toc_state: ratatui::widgets::ListState,
     pub bookmark_state: ratatui::widgets::ListState,
     pub bookmarks: BookmarkStore,
+    pub copilot: CopilotState,
     pub picker: Option<Picker>,
     pub book_path: String,
     pub should_quit: bool,
@@ -52,7 +56,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(reader: Box<dyn BookReader>, book_path: String) -> Result<Self> {
+    pub fn new_with_copilot(
+        reader: Box<dyn BookReader>,
+        book_path: String,
+        copilot_config: CopilotConfig,
+    ) -> Result<Self> {
         let bookmarks = BookmarkStore::load()?;
         let picker = Picker::from_query_stdio()
             .ok()
@@ -72,6 +80,7 @@ impl App {
             toc_state: ratatui::widgets::ListState::default(),
             bookmark_state: ratatui::widgets::ListState::default(),
             bookmarks,
+            copilot: CopilotState::new(copilot_config),
             picker,
             book_path,
             should_quit: false,
@@ -94,6 +103,7 @@ impl App {
     /// (Re-)paginate the current chapter for the given terminal size.
     pub fn load_chapter(&mut self, chapter_idx: usize, size: Size) {
         self.anim = None; // cancel any in-flight animation
+        let size = crate::ui::reader_size(size, self.mode);
         let key = PaginationKey {
             chapter: chapter_idx,
             width: size.width,
@@ -165,8 +175,7 @@ impl App {
 
     /// Called on terminal resize.
     pub fn on_resize(&mut self, size: Size) {
-        self.pagination_key = None; // force re-paginate
-        self.load_chapter(self.current_chapter, size);
+        self.reflow_current_chapter(size);
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, size: Size) {
@@ -174,6 +183,7 @@ impl App {
             Mode::Reading => self.handle_key_reading(key, size),
             Mode::TocOverlay => self.handle_key_toc(key, size),
             Mode::BookmarkOverlay => self.handle_key_bookmarks(key, size),
+            Mode::CopilotPanel => self.handle_key_copilot(key, size),
         }
     }
 
@@ -200,6 +210,41 @@ impl App {
         // discarded its cached image, while Sixel/iTerm2 get fresh image data.
         self.refresh_current_image();
         self.needs_terminal_clear = true;
+    }
+
+    fn open_copilot_panel(&mut self, size: Size) {
+        self.copilot.open();
+        self.mode = Mode::CopilotPanel;
+        self.anim = None;
+        self.needs_terminal_clear = true;
+        self.reflow_current_chapter(size);
+    }
+
+    fn close_copilot_panel(&mut self, size: Size) {
+        self.copilot.cancel();
+        self.mode = Mode::Reading;
+        self.reflow_current_chapter(size);
+        // Rebuild the image protocol for the wider reading area after the
+        // physical terminal has been cleared.
+        self.refresh_current_image();
+        self.needs_terminal_clear = true;
+    }
+
+    /// Reflow after a pane or terminal size change while retaining the
+    /// reader's approximate position within the current chapter.
+    fn reflow_current_chapter(&mut self, size: Size) {
+        let old_page = self.current_page;
+        let old_page_count = self.pages.len().max(1);
+        let chapter = self.current_chapter;
+        self.pagination_key = None;
+        self.load_chapter(chapter, size);
+        let new_page_count = self.pages.len().max(1);
+        self.current_page = old_page
+            .saturating_mul(new_page_count)
+            .checked_div(old_page_count)
+            .unwrap_or(0)
+            .min(new_page_count - 1);
+        self.refresh_current_image();
     }
 
     pub(crate) fn current_location_title(&self) -> &str {
@@ -271,6 +316,10 @@ impl App {
             KeyCode::Char('b') => {
                 self.open_overlay(Mode::BookmarkOverlay);
                 self.bookmark_state.select(Some(0));
+            }
+            // Open the reading copilot for the current visible page.
+            KeyCode::Char('c') => {
+                self.open_copilot_panel(size);
             }
             // Save bookmark at current position
             KeyCode::Char('s') => {
@@ -398,6 +447,109 @@ impl App {
         }
     }
 
+    fn handle_key_copilot(&mut self, key: KeyEvent, size: Size) {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Char('c')) {
+            self.close_copilot_panel(size);
+            return;
+        }
+
+        match self.copilot.phase {
+            CopilotPhase::Menu => match key.code {
+                KeyCode::Char('e') => self.start_copilot_task(CopilotTask::Explain),
+                KeyCode::Char('t') => self.start_copilot_task(CopilotTask::Translate),
+                KeyCode::Char('s') => self.start_copilot_task(CopilotTask::Summarize),
+                KeyCode::Char('r') => self.start_copilot_task(CopilotTask::Analyze),
+                KeyCode::Char('a') => self.copilot.begin_input(),
+                KeyCode::Char('q') => self.close_copilot_panel(size),
+                _ => {}
+            },
+            CopilotPhase::Input => match key.code {
+                KeyCode::Enter if !self.copilot.input.trim().is_empty() => {
+                    let question = self.copilot.input.trim().to_string();
+                    self.start_copilot_task(CopilotTask::Ask(question));
+                }
+                KeyCode::Backspace => {
+                    self.copilot.input.pop();
+                }
+                KeyCode::Char(ch)
+                    if !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    self.copilot.input.push(ch);
+                }
+                _ => {}
+            },
+            CopilotPhase::Working => match key.code {
+                KeyCode::Char('x') => {
+                    self.copilot.cancel();
+                    self.copilot.phase = CopilotPhase::Menu;
+                    self.copilot.status.clear();
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.copilot.scroll = self.copilot.scroll.saturating_add(1);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.copilot.scroll = self.copilot.scroll.saturating_sub(1);
+                }
+                _ => {}
+            },
+            CopilotPhase::Answer => match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.copilot.scroll = self.copilot.scroll.saturating_add(1);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.copilot.scroll = self.copilot.scroll.saturating_sub(1);
+                }
+                KeyCode::Char('a') => self.copilot.begin_input(),
+                KeyCode::Char('r') => self.copilot.retry(),
+                _ => {}
+            },
+            CopilotPhase::Error => match key.code {
+                KeyCode::Char('r') => self.copilot.retry(),
+                KeyCode::Char('m') | KeyCode::Char('q') => {
+                    self.copilot.phase = CopilotPhase::Menu;
+                    self.copilot.error.clear();
+                }
+                _ => {}
+            },
+        }
+    }
+
+    fn start_copilot_task(&mut self, task: CopilotTask) {
+        let Some(context) = self.copilot_context() else {
+            self.copilot.phase = CopilotPhase::Error;
+            self.copilot.error = if self.showing_cover {
+                "The cover has no text context. Move to a reading page first.".to_string()
+            } else {
+                "This page has no extractable text. Image understanding is not enabled in this version."
+                    .to_string()
+            };
+            return;
+        };
+        self.copilot.start(task, context);
+    }
+
+    fn copilot_context(&self) -> Option<CopilotContext> {
+        if self.showing_cover {
+            return None;
+        }
+        let excerpt = self.pages.get(self.current_page)?.lines.join("\n");
+        let excerpt = excerpt
+            .replace(INLINE_REF_OPEN, "(")
+            .replace(INLINE_REF_CLOSE, ")");
+        if excerpt.trim().is_empty() {
+            return None;
+        }
+
+        Some(CopilotContext {
+            book_title: self.reader.meta().title.clone(),
+            location: self.current_location_title().to_string(),
+            excerpt,
+            prior_exchange: None,
+        })
+    }
+
     fn next_page(&mut self, size: Size) {
         // Dismiss cover: transition to chapter 0 page 0 without animation.
         if self.showing_cover {
@@ -509,6 +661,12 @@ impl App {
         {
             self.anim = None;
         }
+    }
+
+    /// Advance time-based UI state and drain background Copilot events.
+    pub fn tick(&mut self) {
+        self.tick_anim();
+        self.copilot.poll();
     }
 
     fn save_current_bookmark(&mut self) -> Result<()> {
@@ -639,6 +797,7 @@ mod tests {
             toc_state: ratatui::widgets::ListState::default(),
             bookmark_state: ratatui::widgets::ListState::default(),
             bookmarks: store,
+            copilot: CopilotState::new(CopilotConfig::default()),
             picker: None,
             book_path: BOOK_PATH.to_string(),
             should_quit: false,
@@ -928,6 +1087,7 @@ mod tests {
             toc_state: ratatui::widgets::ListState::default(),
             bookmark_state: ratatui::widgets::ListState::default(),
             bookmarks: store,
+            copilot: CopilotState::new(CopilotConfig::default()),
             picker: None,
             book_path: BOOK_PATH.to_string(),
             should_quit: false,
@@ -947,5 +1107,61 @@ mod tests {
 
         assert_eq!(app.current_chapter, 2);
         assert_eq!(app.mode, Mode::Reading);
+    }
+
+    #[test]
+    fn copilot_opens_without_contacting_a_model_and_uses_visible_page_only() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(40, 8);
+        app.load_chapter(0, size);
+        app.current_page = 1;
+
+        let expected_excerpt = app.pages[1].lines.join("\n");
+        app.handle_key(KeyEvent::from(KeyCode::Char('c')), size);
+
+        assert_eq!(app.mode, Mode::CopilotPanel);
+        assert_eq!(app.copilot.phase, CopilotPhase::Menu);
+        assert_eq!(app.copilot_context().unwrap().excerpt, expected_excerpt);
+        assert!(app.take_terminal_clear_request());
+    }
+
+    #[test]
+    fn wide_copilot_panel_reflows_reader_and_restores_full_width() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(160, 30);
+        app.load_chapter(0, size);
+        app.current_page = 2;
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('c')), size);
+
+        assert_eq!(app.mode, Mode::CopilotPanel);
+        assert_eq!(app.pagination_key.as_ref().unwrap().width, 96);
+        assert_eq!(app.current_page, 2);
+
+        app.handle_key(KeyEvent::from(KeyCode::Esc), size);
+
+        assert_eq!(app.mode, Mode::Reading);
+        assert_eq!(app.pagination_key.as_ref().unwrap().width, 160);
+        assert_eq!(app.current_page, 2);
+    }
+
+    #[test]
+    fn copilot_rejects_cover_without_starting_a_request() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut app = make_app(make_store(&path));
+        let size = Size::new(40, 8);
+        app.showing_cover = true;
+
+        app.handle_key(KeyEvent::from(KeyCode::Char('c')), size);
+        app.handle_key(KeyEvent::from(KeyCode::Char('e')), size);
+
+        assert_eq!(app.copilot.phase, CopilotPhase::Error);
+        assert!(app.copilot.error.contains("cover"));
+        assert!(!app.copilot.is_working());
     }
 }

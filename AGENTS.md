@@ -12,6 +12,7 @@ src/
 ├── main.rs           # Entry point, CLI args parsing
 ├── app.rs            # Application state machine (ratatui event loop)
 ├── book.rs           # Unified Book/Page representation
+├── copilot.rs        # Rig reading agent + background streaming state
 ├── formats/
 │   ├── mod.rs        # BookReader trait definition
 │   ├── epub.rs       # EPUB parser (uses `rbook` crate)
@@ -20,6 +21,7 @@ src/
 ├── ui/
 │   ├── mod.rs
 │   ├── reader.rs     # Main reading view (paginated text + images)
+│   ├── copilot.rs    # Reading Copilot responsive right panel
 │   ├── toc.rs        # Table of contents / chapter selection popup
 │   └── bookmarks.rs  # Bookmark management popup
 └── storage.rs        # Bookmark persistence (~/.local/share/ink-reader/)
@@ -127,6 +129,29 @@ transition between text and images or between two images, must request `Terminal
 image protocol so the reading page can be restored after that full clear. `Clear` in the popup widgets
 is still required for their character-cell background, but is not sufficient to erase terminal graphics.
 
+### Reading Copilot / Agent Boundary
+`copilot.rs` builds a page-scoped Rig Agent and streams its output on a dedicated thread/runtime;
+model IO must never block the ratatui event loop. The first version gives the Agent no tools and
+copies only the current visible text page plus book/location labels into its context. Cover and
+image-only pages are rejected rather than silently sending unrelated or empty context.
+
+The default provider is local Ollama at `http://127.0.0.1:11434`, with `qwen3.5:4b` for all tasks.
+An optional `--copilot-reasoning-model` is used only for deep analysis. Provider/model/endpoint/API
+key can be overridden by CLI/env; non-loopback endpoints must be visibly marked remote because the
+page excerpt leaves the machine. Never display or persist API keys. Ollama is an optional runtime,
+not a build/test prerequisite.
+
+Rig is the long-term Agent First boundary. Future RAG, conversation memory, and book tools should use
+Rig abstractions without moving provider IO into `App` or UI modules. New Agent tools start read-only;
+any state-changing tool needs explicit product authorization and tests.
+
+On terminals at least 90 columns wide, Copilot is a 40–64 column right panel and the book remains
+visible on the left. Opening, closing, or resizing the panel must repaginate against the actual reader
+pane width and preserve the approximate chapter position. Narrow terminals use a full-screen fallback.
+Unlike a popup, a side-by-side Copilot panel may render a terminal image only inside the disjoint left
+pane; transitions still require a full terminal clear. ToC/bookmark popups must continue suppressing
+all terminal image rendering.
+
 ## Key Dependencies
 
 | Crate | Version | Purpose |
@@ -136,6 +161,8 @@ is still required for their character-cell background, but is not sufficient to 
 | ratatui-image | 10.x | Terminal image display (Kitty/Sixel/half-block) — use `Picker::halfblocks()` as fallback, NOT `Picker::new()` |
 | rbook | 0.7 | EPUB 2+3 parsing |
 | pdf_oxide | 0.3.77 + rendering | PDF metadata, outline, text/table/image extraction, page rendering |
+| rig-core | 0.40 | Reading Agent, Ollama provider, streaming, future tools/RAG/memory |
+| tokio + futures-util | 1.x / 0.3 | Background Agent runtime and response stream |
 | html2text | 0.17 | HTML→plain text for EPUB content |
 | textwrap | 0.16 | Word-wrap text to terminal width |
 | serde + serde_json | 1.x | Bookmark serialization |
@@ -159,6 +186,7 @@ cargo test
 - `t` or `T`: Open ToC (chapter selection)
 - `b` or `B`: Open bookmarks panel
 - `s`: Save or overwrite the bookmark at the current position
+- `c`: Open Reading Copilot for the visible page
 - `q` or `Esc`: Quit (or close popup)
 - `j` / `k`: Scroll within popup lists
 
@@ -172,6 +200,7 @@ cargo test
 - **Inline illustrations**: EPUB chapter illustrations rendered in-place; SVG/unsupported images shown as `[Image: alt]` placeholder
 - **Images**: Auto-detect terminal protocol; fallback to half-block if unsupported
 - **PDF extraction**: Reflowed text, styled headings, structured tables, embedded images, XMP/Info metadata, native outline, page labels
+- **Reading Copilot**: Page-scoped Rig Agent in a responsive right panel with explain/translate/summarize/deep-analysis/custom-question actions, streaming output, cancellation, local/remote privacy label
 - **Formats**: EPUB, PDF, TXT
 
 ## Code Conventions
@@ -186,3 +215,4 @@ cargo test
 - Terminal dimensions must be re-queried before paginating (handle resize events)
 - Image display is always optional — reader must work in text-only mode
 - Never render a terminal image behind a popup; synchronize terminal graphics and ratatui's diff buffer with a full clear on image/overlay transitions
+- Never block the TUI event loop on Agent/provider IO or silently send book content to a remote endpoint
