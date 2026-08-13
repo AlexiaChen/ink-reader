@@ -1,0 +1,14 @@
+[Unit]
+Description=Ollama user service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/ollama serve
+Restart=always
+RestartSec=3
+Environment=OLLAMA_HOST=127.0.0.1:11434
+EnvironmentFile=-%h/.config/ollama/environment
+
+[Install]
+WantedBy=default.target

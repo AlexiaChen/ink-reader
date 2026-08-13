@@ -11,7 +11,7 @@ use ratatui_image::protocol::StatefulProtocol;
 use crate::app::{AnimState, App, Mode};
 use crate::book::{INLINE_REF_CLOSE, INLINE_REF_OPEN};
 
-pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
+pub fn render(frame: &mut Frame, app: &mut App, area: Rect, allow_terminal_image: bool) {
     // Layout: status (1) | content (fill) | help (1)
     let chunks = Layout::vertical([
         Constraint::Length(1),
@@ -21,7 +21,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     .split(area);
 
     render_status(frame, app, chunks[0]);
-    render_content(frame, app, chunks[1]);
+    render_content(frame, app, chunks[1], allow_terminal_image);
     render_help(frame, chunks[2]);
 }
 
@@ -53,11 +53,12 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_content(frame: &mut Frame, app: &mut App, area: Rect, allow_terminal_image: bool) {
     // Terminal graphics can sit outside ratatui's character buffer. Never draw
     // them behind a popup: `Clear` only resets cells and cannot reliably cover
     // Sixel/iTerm2 images on every terminal implementation.
-    if app.mode == Mode::Reading
+    if allow_terminal_image
+        && matches!(app.mode, Mode::Reading | Mode::CopilotPanel)
         && let Some(ref mut proto) = app.current_image
     {
         let caption: Vec<Line> = app
@@ -261,7 +262,7 @@ fn inline_reference_bracket_style() -> Style {
 }
 
 fn render_help(frame: &mut Frame, area: Rect) {
-    let help = " ↑ prev  ↓ next  n/p chapter  t ToC  b Bookmarks  s Save bookmark  q Quit";
+    let help = " ↑ prev  ↓ next  n/p chapter  c Copilot  t ToC  b Bookmarks  s Save  q Quit";
     let line = Line::from(Span::styled(
         help,
         Style::default().fg(Color::DarkGray).bg(Color::Black),

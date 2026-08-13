@@ -8,7 +8,9 @@ use ratatui::layout::Size;
 
 mod app;
 mod book;
+mod copilot;
 mod formats;
+mod math_render;
 mod storage;
 mod ui;
 
@@ -20,6 +22,18 @@ use storage::book_id;
 struct Args {
     /// Path to the e-book file (epub, pdf, txt)
     file: PathBuf,
+
+    /// Ollama-compatible API base URL (env: INK_READER_OLLAMA_URL)
+    #[arg(long)]
+    ollama_url: Option<String>,
+
+    /// Model for explain, translate, summarize, and questions
+    #[arg(long)]
+    copilot_model: Option<String>,
+
+    /// Optional separate model for deep reasoning (defaults to copilot-model)
+    #[arg(long)]
+    copilot_reasoning_model: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -33,7 +47,12 @@ fn main() -> Result<()> {
     let reader = formats::load_reader(&canonical)?;
 
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal, reader, &canonical);
+    let copilot_config = copilot::CopilotConfig::from_overrides(
+        args.ollama_url,
+        args.copilot_model,
+        args.copilot_reasoning_model,
+    );
+    let result = run(&mut terminal, reader, &canonical, copilot_config);
     ratatui::restore();
 
     result
@@ -43,8 +62,9 @@ fn run(
     terminal: &mut ratatui::DefaultTerminal,
     reader: Box<dyn book::BookReader>,
     book_path: &std::path::Path,
+    copilot_config: copilot::CopilotConfig,
 ) -> Result<()> {
-    let mut app = App::new(reader, book_id(book_path))?;
+    let mut app = App::new_with_copilot(reader, book_id(book_path), copilot_config)?;
 
     // Initial render — we need the terminal size to paginate
     let size = terminal.size()?;
@@ -57,13 +77,17 @@ fn run(
     disable_mouse_capture(&mut stdout)?;
 
     loop {
-        app.tick_anim();
+        app.tick();
         if app.take_terminal_clear_request() {
             terminal.clear()?;
         }
         terminal.draw(|frame| ui::render(frame, &mut app))?;
 
-        let poll_ms: u64 = if app.anim.is_some() { 15 } else { 200 };
+        let poll_ms: u64 = if app.anim.is_some() || app.copilot.is_working() {
+            15
+        } else {
+            200
+        };
         if !event::poll(Duration::from_millis(poll_ms))? {
             continue;
         }

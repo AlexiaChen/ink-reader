@@ -221,3 +221,27 @@
 - **Evidence**: `src/ui/reader.rs` 仅在 `Mode::Reading` 绘图；`src/app.rs` 的 image/overlay clear request；`src/main.rs` 在下一帧前调用 `Terminal::clear()`
 - **Confidence**: 10/10
 - **Action**: 任何 popup 打开/关闭，以及 text→image、image→text、image→image 的双向切换，都必须同时处理物理终端图形与 ratatui diff 缓冲；进入图片页前也要全屏清理，否则图片区域的 skipped cells 会保留上一页文字。弹窗期间不要在底层帧重复渲染图片，关闭后重建图片协议。
+
+### L-027: [architecture] Agent 流不能阻塞 ratatui 事件循环 (2026-08-13)
+- **Issue**: 增加 Agent First Reading Copilot
+- **Trigger**: rig, ollama, streaming, tui, agent, wsl2, cancellation
+- **Pattern**: 本地小模型的加载和生成可能持续数秒到数分钟；若在 `handle_key()` 中等待请求，重绘、取消、退出和 resize 都会冻结。Agent 必须在独立 runtime/thread 中运行，通过 channel 把 reasoning 状态、文本 delta、完成或错误送回 `App::tick()`。上下文应在启动时复制当前可见页，不能让后台任务借用会随翻页/resize 改变的 `App` 状态。
+- **Evidence**: `src/copilot.rs` `spawn_request()` / `stream_agent()`，`src/app.rs` `tick()` / `copilot_context()`
+- **Confidence**: 10/10
+- **Action**: 后续增加 Rig tools、memory 或 RAG 时，继续保持 provider/agent IO 与 TUI 状态机隔离；任何工具副作用都要单独授权，不能因 Agent First 默认放开。
+
+### L-028: [architecture] Copilot 分栏宽度必须参与正文分页 (2026-08-13)
+- **Issue**: Reading Copilot 从遮罩弹窗改为右侧常驻面板
+- **Trigger**: ratatui, side panel, pagination, resize, terminal image
+- **Pattern**: 只在绘制阶段把屏幕切成左右两栏会让正文仍按全屏宽度分页，造成截断、页码错位和传给 Agent 的上下文与左侧可见内容不一致。分栏几何必须同时用于 `paginate_blocks()`；打开、关闭和 resize 时重新分页，并按原页在章节内的比例恢复近似位置。窄屏要回退全屏，不能硬挤两个不可读区域。
+- **Evidence**: `src/ui/mod.rs` `copilot_layout()` / `reader_size()`；`src/app.rs` `reflow_current_chapter()`；`src/ui/reader.rs` 分栏图片渲染开关
+- **Confidence**: 10/10
+- **Action**: 后续增加可拖拽宽度、左侧翻页或多面板时，布局状态必须先进入分页 key；终端图片只允许画在与面板不重叠的 reader Rect 内，几何变化仍需 full clear。
+
+### L-029: [architecture] 流式公式优先使用同坐标系的 Unicode 排版 (2026-08-13)
+- **Issue**: Reading Copilot 回复中的 `$...$` LaTeX 在终端原样泄漏
+- **Trigger**: latex, markdown, term-maths, pulldown-cmark, streaming, ratatui-image
+- **Pattern**: 把每个公式转成图片虽然精细，但滚动回答会在每个 token 后重排位置，Kitty/Sixel/iTerm2 图片又不属于 ratatui 字符缓冲；多图缩放、移动和擦除容易阻塞 UI 或覆盖邻近面板。使用 Markdown `InlineMath` / `DisplayMath` 事件识别完整 delimiter，再把 TeX 排成二维 Unicode 网格，公式与文本共享滚动坐标，未闭合流式公式也能自然保留原文。
+- **Evidence**: `src/math_render.rs` `render_markdown()` / `push_formula()`；`src/ui/copilot.rs` `render_answer()`；`src/copilot.rs` Agent system prompt
+- **Confidence**: 9/10
+- **Action**: 公式输入始终视为不可信：限制长度和嵌套、捕获 parser panic、限制缓存；宽公式必须附带可见源码回退。只有未来能提供后台 resize、精确 image placement 和跨协议清屏测试时，才增加可选 SVG/PNG 后端。
